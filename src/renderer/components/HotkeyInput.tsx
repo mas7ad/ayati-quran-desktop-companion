@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface HotkeyInputProps {
   label: string;
@@ -42,6 +42,34 @@ export const HotkeyInput: React.FC<HotkeyInputProps> = ({
   theme = 'dark',
 }) => {
   const [isRecording, setIsRecording] = useState(false);
+  const captureActiveRef = useRef(false);
+
+  const stopCapture = useCallback(() => {
+    if (!captureActiveRef.current) {
+      setIsRecording(false);
+      return;
+    }
+    captureActiveRef.current = false;
+    void window.ayati?.endHotkeyCapture?.();
+    setIsRecording(false);
+  }, []);
+
+  const startCapture = useCallback(() => {
+    if (isRecording) return;
+    captureActiveRef.current = true;
+    void window.ayati?.beginHotkeyCapture?.();
+    setIsRecording(true);
+  }, [isRecording]);
+
+  useEffect(() => {
+    return () => {
+      if (captureActiveRef.current) {
+        captureActiveRef.current = false;
+        void window.ayati?.endHotkeyCapture?.();
+      }
+    };
+  }, []);
+
   const isSetupInverted = theme === 'setupInverted';
   const labelClassName = isSetupInverted ? 'text-[#1a2a24]' : 'text-neutral-200';
   const descriptionClassName = isSetupInverted ? 'text-[#1a2a24]/40' : 'text-neutral-500';
@@ -69,7 +97,7 @@ export const HotkeyInput: React.FC<HotkeyInputProps> = ({
     parts.push(acceleratorKey);
 
     onChange(parts.join('+'));
-    setIsRecording(false);
+    stopCapture();
   };
 
   return (
@@ -81,8 +109,8 @@ export const HotkeyInput: React.FC<HotkeyInputProps> = ({
       <button
         aria-label={`Change ${label} shortcut, currently ${formattedHotkey}`}
         onKeyDown={handleKeyDown}
-        onClick={() => setIsRecording(true)}
-        onBlur={() => setIsRecording(false)}
+        onClick={startCapture}
+        onBlur={stopCapture}
         className={`px-3 py-2 rounded-lg text-sm font-mono transition-colors min-w-[140px] text-center ${buttonClassName}`}
       >
         {isRecording ? 'Press keys…' : formattedHotkey}

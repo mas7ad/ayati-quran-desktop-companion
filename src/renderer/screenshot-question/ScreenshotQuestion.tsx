@@ -51,10 +51,44 @@ export function ScreenshotQuestion(): JSX.Element {
     }
   }, []);
 
+  const applyPendingResult = useCallback((pendingResult: PendingAyahReflectionResult | null): boolean => {
+    if (!pendingResult) return false;
+
+    setReflection(null);
+    setMessage('');
+    if (pendingResult.reflection) {
+      setReflection(pendingResult.reflection);
+      setCaptureState('ready');
+      if (pendingResult.reflection.syncState === 'local') {
+        setMessage('Screenshot analyzed locally. The image was not stored.');
+      }
+      return true;
+    }
+
+    if (pendingResult.error) {
+      setCaptureState('error');
+      setMessage(getErrorMessage(pendingResult.error));
+      return true;
+    }
+
+    return false;
+  }, []);
+
   useEffect(() => {
-    void captureReflection();
+    let isCancelled = false;
+    const initializeReflection = async () => {
+      const pendingResult = await window.ayati.getPendingAyahReflectionResult?.();
+      if (isCancelled) return;
+      if (applyPendingResult(pendingResult ?? null)) return;
+      void captureReflection();
+    };
+
+    void initializeReflection();
     window.ayati.getAyahCollections?.().then(setCollections).catch(() => setCollections([]));
-  }, [captureReflection]);
+    return () => {
+      isCancelled = true;
+    };
+  }, [applyPendingResult, captureReflection]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

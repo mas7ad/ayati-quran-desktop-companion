@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildContextualQuranNudge, buildTimedQuranReminder } from './ayah-contextual-nudges';
 import { createDefaultAyahLensState } from './ayah-reflection-store';
@@ -46,6 +46,8 @@ describe('buildContextualQuranNudge', () => {
     });
     expect(result?.message.text).toContain('A fitting reminder');
     expect(result?.message.text).toContain('96:1');
+    expect(result?.message.arabicText).toBe(verseContent.arabicText);
+    expect(result?.message.footerText).toBe(verseContent.translation);
     expect(result?.reflection).toMatchObject({
       verseKey: '96:1',
       screenSummary: expect.stringMatching(/study.*window/i),
@@ -124,7 +126,8 @@ describe('buildContextualQuranNudge', () => {
       }),
     }));
 
-    expect(result?.message.text).toContain('Read, in the Name of your Lord Who created.');
+    expect(result?.message.text).toContain('A fitting reminder');
+    expect(result?.message.footerText).toBe('Read, in the Name of your Lord Who created.');
     expect(result?.reflection).toMatchObject({
       verseKey: '96:1',
       surahName: 'Al-Alaq',
@@ -152,6 +155,11 @@ describe('buildContextualQuranNudge', () => {
 });
 
 describe('buildTimedQuranReminder', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
   it('chooses a random surah and then a random verse from that surah', async () => {
     const randomSpy = vi.spyOn(Math, 'random')
       .mockReturnValueOnce(0.999)
@@ -200,6 +208,8 @@ describe('buildTimedQuranReminder', () => {
       quickReplies: ['Reflect', 'Save', 'Not now'],
     });
     expect(result?.message.text).toContain('Time for a Quran reminder');
+    expect(result?.message.arabicText).toBe(verseContent.arabicText);
+    expect(result?.message.footerText).toBe(verseContent.translation);
     expect(result?.nextState.shownToday).toBe(2);
     expect(result?.nextState.lastShownAt).toBe(NOW);
     expect(result?.nextState.lastTimedReminderAt).toBe(NOW);
@@ -208,6 +218,44 @@ describe('buildTimedQuranReminder', () => {
       screenSummary: 'A timer-based Quran reminder was due.',
       whyThisVerse: 'This reminder was shown on the interval you set.',
     });
+  });
+
+  it('falls back quickly to bundled Arabic verse content when the live timed reminder fetch stalls', async () => {
+    vi.useFakeTimers();
+    const randomSpy = vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0.999)
+      .mockReturnValueOnce(0.999);
+    const fetchVerseContent = vi.fn(() => new Promise<QuranVerseContent>(() => {}));
+    const stalledReminder = buildTimedQuranReminder({
+      ...defaultInput({
+        settings: defaultSettings({
+          timedReminders: true,
+          timedReminderMinutes: 5,
+        }),
+      }),
+      fetchVerseContent,
+      verseFetchTimeoutMs: 50,
+    });
+
+    let hasSettled = false;
+    void stalledReminder.finally(() => {
+      hasSettled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(hasSettled).toBe(true);
+    await expect(stalledReminder).resolves.toMatchObject({
+      message: {
+        arabicText: 'أَلَا بِذِكْرِ ٱللَّهِ تَطْمَئِنُّ ٱلْقُلُوبُ',
+        footerText: 'Surely in the remembrance of Allah do hearts find comfort.',
+      },
+      reflection: {
+        verseKey: '13:28',
+        arabicText: 'أَلَا بِذِكْرِ ٱللَّهِ تَطْمَئِنُّ ٱلْقُلُوبُ',
+      },
+    });
+    randomSpy.mockRestore();
   });
 
   it('returns null when timed reminders are disabled', async () => {

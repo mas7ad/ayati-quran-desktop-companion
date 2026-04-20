@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AyahVerseCard } from './AyahVerseCard';
+import { AyahVerseCard, getTafsirParagraphs } from './AyahVerseCard';
 import type { AyahReflection } from '../../main/ayah-types';
 
 const reflection: AyahReflection = {
@@ -22,6 +22,15 @@ const reflection: AyahReflection = {
 };
 
 describe('AyahVerseCard', () => {
+  it('formats long tafsir text into readable paragraphs', () => {
+    const paragraphs = getTafsirParagraphs(
+      'The first explanation introduces the theme and gives the main context. It continues with supporting detail that should not stay in one dense block. The next explanation gives a second point and should become easier to scan. Final reminder.',
+    );
+
+    expect(paragraphs.length).toBeGreaterThan(1);
+    expect(paragraphs.join(' ')).toContain('Final reminder.');
+  });
+
   it('renders Arabic, translation, reference, why line, and save action', async () => {
     const handleSave = vi.fn();
     render(<AyahVerseCard reflection={reflection} onSave={handleSave} />);

@@ -22,6 +22,7 @@ function installMockAyati(): {
     hidePetChat: vi.fn(),
     openAssistant: vi.fn(),
     saveAyahReflection: vi.fn(),
+    saveAyahReflectionNote: vi.fn(),
     getClawbotStatus: vi.fn(),
     sendToClawbot: vi.fn(),
   } satisfies Partial<Window['ayati']>;
@@ -78,7 +79,7 @@ describe('PetChat', () => {
     });
   });
 
-  it('opens the reflection flow when a Quran nudge asks to reflect', async () => {
+  it('opens an inline reflection note when Reflect is chosen for a Quran nudge', async () => {
     const user = userEvent.setup();
     const { sendPetMessage } = installMockAyati();
 
@@ -87,7 +88,9 @@ describe('PetChat', () => {
     act(() => {
       sendPetMessage({
         id: 'pet-message-2',
-        text: 'A fitting reminder: Read, in the Name of your Lord Who created. — 96:1',
+        text: 'A fitting reminder — **Al-Alaq · 96:1**',
+        arabicText: 'ٱقْرَأْ',
+        footerText: 'Read, in the Name of your Lord Who created.',
         quickReplies: ['Reflect', 'Save', 'Not now'],
         reflectionId: 'reflection-1',
       });
@@ -98,8 +101,93 @@ describe('PetChat', () => {
     });
 
     expect(window.ayati.petChatReply).toHaveBeenCalledWith('curious');
-    expect(window.ayati.openAssistant).toHaveBeenCalled();
-    expect(window.ayati.hidePetChat).toHaveBeenCalled();
+    expect(window.ayati.openAssistant).not.toHaveBeenCalled();
+    expect(window.ayati.hidePetChat).not.toHaveBeenCalled();
+    expect(screen.getByText('ٱقْرَأْ')).toHaveAttribute('dir', 'rtl');
+    expect(screen.getByText('Read, in the Name of your Lord Who created.')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/write your reflection/i)).toBeInTheDocument();
+  });
+
+  it('reports content size again when a same-sized reminder replaces the current message', async () => {
+    const { sendPetMessage } = installMockAyati();
+
+    render(<PetChat />);
+
+    act(() => {
+      sendPetMessage({
+        id: 'pet-message-size-1',
+        text: 'First reminder',
+        quickReplies: ['Not now'],
+      });
+    });
+
+    await waitFor(() => {
+      expect(window.ayati.resizePetChat).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      sendPetMessage({
+        id: 'pet-message-size-2',
+        text: 'Other reminder',
+        quickReplies: ['Not now'],
+      });
+    });
+
+    await waitFor(() => {
+      expect(window.ayati.resizePetChat).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('saves a reflection note from the pet chat field', async () => {
+    const user = userEvent.setup();
+    const { sendPetMessage } = installMockAyati();
+    vi.mocked(window.ayati.saveAyahReflectionNote).mockResolvedValue({
+      id: 'reflection-1',
+      verseKey: '96:1',
+      surahName: 'Al-Alaq',
+      ayahNumber: 1,
+      arabicText: 'ٱقْرَأْ',
+      translation: 'Read.',
+      translatorId: 20,
+      reflection: 'Begin with remembrance.',
+      whyThisVerse: 'The screen suggested study.',
+      screenSummary: 'A study window is active.',
+      themes: [{ id: 'study', confidence: 0.82 }],
+      createdAt: Date.now(),
+      savedAt: Date.now(),
+      syncState: 'local',
+      note: { body: 'A thoughtful note about this ayah.', syncState: 'local' },
+    });
+
+    render(<PetChat />);
+
+    act(() => {
+      sendPetMessage({
+        id: 'pet-message-note',
+        text: 'A fitting reminder — **Al-Alaq · 96:1**',
+        quickReplies: ['Reflect', 'Save', 'Not now'],
+        reflectionId: 'reflection-1',
+      });
+    });
+
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: 'Reflect' }));
+    });
+
+    const field = screen.getByPlaceholderText(/write your reflection/i);
+    await user.type(field, 'A thoughtful note about this ayah.');
+
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: 'Save reflection' }));
+    });
+
+    await waitFor(() => {
+      expect(window.ayati.saveAyahReflectionNote).toHaveBeenCalledWith(
+        'reflection-1',
+        'A thoughtful note about this ayah.',
+      );
+    });
+    expect(await screen.findByText(/reflection note saved/i)).toBeInTheDocument();
   });
 
   it('saves the linked reflection when a Quran nudge asks to save', async () => {

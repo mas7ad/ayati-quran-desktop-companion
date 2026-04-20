@@ -37,12 +37,13 @@ button {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 14px;
+  padding: 10px;
   color: var(--text);
 }
 
 .ayah-capture-panel {
-  width: min(560px, 100%);
+  width: 100%;
+  height: 100%;
   max-height: 100%;
   overflow: auto;
   background: var(--panel);
@@ -238,6 +239,20 @@ h2 {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.ayah-tafsir-body {
+  display: grid;
+  gap: 10px;
+  max-height: 210px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ayah-tafsir-paragraph {
+  color: #cdd6dc;
+  font-size: 13px;
+  line-height: 1.65;
 }
 
 .ayah-expandable-panel audio {

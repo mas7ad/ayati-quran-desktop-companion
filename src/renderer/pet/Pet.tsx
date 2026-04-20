@@ -18,6 +18,8 @@ interface ChatMessage {
   trigger?: 'app_switch' | 'idle' | 'proactive' | 'suggestion';
   quickReplies?: string[];
   reflectionId?: string;
+  arabicText?: string;
+  footerText?: string;
 }
 
 const DEFAULT_QUICK_REPLIES = ['Thanks!', 'Tell me more', 'Not now'];
@@ -385,6 +387,8 @@ export const Pet: React.FC = () => {
         text: messageData.text || messageData.content || '',
         quickReplies: messageData.quickReplies || DEFAULT_QUICK_REPLIES,
         reflectionId: messageData.reflectionId,
+        arabicText: messageData.arabicText,
+        footerText: messageData.footerText,
       };
       window.ayati.showPetChat(message);
       if (!sleepLockedRef.current) {

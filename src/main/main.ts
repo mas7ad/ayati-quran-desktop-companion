@@ -68,6 +68,7 @@ import { DEFAULT_HOTKEYS, sanitizeAccelerator } from './hotkeys';
 import { getAiProviderConfig } from './ai-providers';
 import { getWindowPositionNearAnchor } from './window-positioning';
 import { enforceSingleInstanceApp } from './single-instance';
+import { shouldHideWindowOnBlur, shouldRevealWindowInactive } from './window-visibility-policy';
 import {
   createConfiguredUpdateState,
   createInitialUpdateState,
@@ -114,6 +115,7 @@ let tray: Tray | null = null;
 let pendingPetChatReveal = false;
 let petChatRevealTimeout: NodeJS.Timeout | null = null;
 let petChatAutoHideTimeout: NodeJS.Timeout | null = null;
+let pendingAyahReflectionResult: { reflection?: AyahReflection; error?: string } | null = null;
 
 // Services
 let watchers: Watchers | null = null;
@@ -419,6 +421,18 @@ function getSafeErrorMessage(error: unknown): string {
   return 'Quran Foundation content API failed. Try again later.';
 }
 
+function getReflectionErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+
+  return 'Ayati - Quran Desktop Companion could not create a reflection right now.';
+}
+
 async function getQuranContentAccessToken(): Promise<string | null> {
   const userToken = await getQuranUserAccessToken();
   if (userToken) return userToken;
@@ -607,6 +621,14 @@ async function captureAyahReflection(): Promise<AyahReflection> {
       capture.image = '';
     }
     isCapturingAyahReflection = false;
+  }
+}
+
+async function preparePendingAyahReflectionResult(): Promise<void> {
+  try {
+    pendingAyahReflectionResult = { reflection: await captureAyahReflection() };
+  } catch (error) {
+    pendingAyahReflectionResult = { error: getReflectionErrorMessage(error) };
   }
 }
 
@@ -985,6 +1007,8 @@ const ASSISTANT_VERTICAL_GAP = -3;
 const WORKSPACE_BROWSER_VERTICAL_GAP = -6;
 const PET_CONTEXT_MENU_WIDTH = 220;
 const PET_CONTEXT_MENU_HEIGHT = 342;
+const ASSISTANT_WINDOW_WIDTH = 400;
+const ASSISTANT_WINDOW_HEIGHT = 500;
 const PET_WAKE_FLIGHT_KEYFRAMES = [
   { progress: 0, x: 0, y: 0 },
   { progress: 0.24, x: -10, y: -24 },
@@ -994,8 +1018,8 @@ const PET_WAKE_FLIGHT_KEYFRAMES = [
 ];
 const WORKSPACE_BROWSER_WIDTH = 420;
 const WORKSPACE_BROWSER_HEIGHT = 520;
-const SCREENSHOT_QUESTION_WIDTH = 520;
-const SCREENSHOT_QUESTION_HEIGHT = 280;
+const SCREENSHOT_QUESTION_WIDTH = ASSISTANT_WINDOW_WIDTH;
+const SCREENSHOT_QUESTION_HEIGHT = ASSISTANT_WINDOW_HEIGHT;
 const PET_CAMERA_SNAP_CAPTURE_DELAY_MS = 560;
 const PET_CAMERA_SNAP_DURATION_MS = 920;
 const PET_CAMERA_SNAP_FLASH_DURATION_MS = 120;
@@ -2102,12 +2126,14 @@ async function maybeSendContextualQuranNudge(
 async function maybeSendTimedQuranReminder(options: { force?: boolean } = {}): Promise<boolean> {
   if (
     !petWindow
-    || tutorialManager?.getStatus().isActive
-    || isCapturingAyahReflection
+    || (!options.force && tutorialManager?.getStatus().isActive)
+    || (!options.force && isCapturingAyahReflection)
     || (!options.force && hasActiveConversationSurface())
   ) {
     return false;
   }
+
+  const petChatDemoOpts = options.force ? { bypassTutorial: true as const } : undefined;
 
   const state = getAyahLensState();
   const reminderSettings = options.force
@@ -2128,12 +2154,14 @@ async function maybeSendTimedQuranReminder(options: { force?: boolean } = {}): P
   } catch (error) {
     const message = getSafeErrorMessage(error);
     console.error('[Ayati - Quran Desktop Companion] Failed to build timed Quran reminder:', error);
-    petWindow.webContents.send('chat-popup', {
-      id: randomUUID(),
-      text: `Quran Foundation error: ${message}`,
-      trigger: 'timer',
-      quickReplies: ['Got it', 'Not now'],
-    });
+    showPetChat(
+      {
+        id: randomUUID(),
+        text: `Quran Foundation error: ${message}`,
+        quickReplies: ['Got it', 'Not now'],
+      },
+      petChatDemoOpts,
+    );
     return false;
   }
 
@@ -2145,7 +2173,10 @@ async function maybeSendTimedQuranReminder(options: { force?: boolean } = {}): P
   }, result.reflection);
   setAyahLensState(nextState);
   resetInteractionTimer();
-  petWindow.webContents.send('chat-popup', result.message);
+  showPetChat(result.message, petChatDemoOpts);
+  if (!isSleeping) {
+    petWindow.webContents.send('clawbot-mood', { state: 'curious', reason: 'timer reminder' });
+  }
   return true;
 }
 
@@ -2295,11 +2326,21 @@ function schedulePetChatAutoHide() {
   }, PET_CHAT_AUTO_HIDE_MS);
 }
 
-function showPetChat(message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) {
+function showPetChat(
+  message: {
+    id: string;
+    text: string;
+    quickReplies?: string[];
+    reflectionId?: string;
+    arabicText?: string;
+    footerText?: string;
+  },
+  options: { bypassTutorial?: boolean } = {},
+) {
   if (!petWindow) return;
 
-  // Don't show chat popups during tutorial
-  if (tutorialManager?.getStatus().isActive) return;
+  // Don't show chat popups during tutorial (dev forced reminders may bypass for demos)
+  if (!options.bypassTutorial && tutorialManager?.getStatus().isActive) return;
   pendingPetChatReveal = true;
 
   const [petX, petY] = petWindow.getPosition();
@@ -2497,8 +2538,11 @@ function revealAssistantWindow() {
     });
   }
 
-  assistantWindow.show();
-  assistantWindow.focus();
+  if (shouldRevealWindowInactive('assistant')) {
+    assistantWindow.showInactive();
+  } else {
+    assistantWindow.show();
+  }
 }
 
 function openAssistantOnTab(tab: 'chat' | 'settings') {
@@ -2530,26 +2574,24 @@ function createAssistantWindow() {
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
 
   // Position above pet if pet window exists, otherwise bottom-right
-  let initialX = screenWidth - 420;
-  let initialY = screenHeight - 520;
+  let initialX = screenWidth - ASSISTANT_WINDOW_WIDTH - 20;
+  let initialY = screenHeight - ASSISTANT_WINDOW_HEIGHT - 20;
 
   if (petWindow) {
     const [petX, petY] = petWindow.getPosition();
     const [petWidth] = petWindow.getSize();
-    const assistantWidth = 400;
-    const assistantHeight = 500;
 
-    initialX = petX + (petWidth - assistantWidth) / 2;
-    initialY = petY - assistantHeight + ASSISTANT_VERTICAL_GAP;
+    initialX = petX + (petWidth - ASSISTANT_WINDOW_WIDTH) / 2;
+    initialY = petY - ASSISTANT_WINDOW_HEIGHT + ASSISTANT_VERTICAL_GAP;
 
     // Keep within screen bounds
-    initialX = Math.max(0, Math.min(initialX, screenWidth - assistantWidth));
+    initialX = Math.max(0, Math.min(initialX, screenWidth - ASSISTANT_WINDOW_WIDTH));
     initialY = Math.max(0, initialY);
   }
 
   assistantWindow = new BrowserWindow({
-    width: 400,
-    height: 500,
+    width: ASSISTANT_WINDOW_WIDTH,
+    height: ASSISTANT_WINDOW_HEIGHT,
     x: Math.round(initialX),
     y: Math.round(initialY),
     frame: false,
@@ -2622,7 +2664,9 @@ function createPetContextMenuWindow() {
   }
 
   petContextMenuWindow.on('blur', () => {
-    petContextMenuWindow?.hide();
+    if (shouldHideWindowOnBlur('petContextMenu')) {
+      petContextMenuWindow?.hide();
+    }
   });
 
   petContextMenuWindow.on('closed', () => {
@@ -2784,7 +2828,9 @@ function createChatbarWindow() {
 
   // Hide on blur (click outside)
   chatbarWindow.on('blur', () => {
-    chatbarWindow?.hide();
+    if (shouldHideWindowOnBlur('chatbar')) {
+      chatbarWindow?.hide();
+    }
   });
 
   chatbarWindow.on('closed', () => {
@@ -2803,13 +2849,9 @@ function toggleChatbarWindow() {
 function createScreenshotQuestionWindow() {
   console.log('[ScreenshotQuestion] Creating window...');
   if (screenshotQuestionWindow) {
-    console.log('[ScreenshotQuestion] Window exists, showing and refocusing');
-    screenshotQuestionWindow.show();
-    updateScreenshotQuestionPosition();
-    screenshotQuestionWindow.focus();
-    // Trigger a fresh screenshot capture
-    screenshotQuestionWindow.webContents.send('retake-screenshot');
-    return;
+    console.log('[ScreenshotQuestion] Window exists, recreating with prepared reflection');
+    screenshotQuestionWindow.destroy();
+    screenshotQuestionWindow = null;
   }
 
   const cursor = screen.getCursorScreenPoint();
@@ -2871,12 +2913,19 @@ function createScreenshotQuestionWindow() {
 
   screenshotQuestionWindow.once('ready-to-show', () => {
     console.log('[ScreenshotQuestion] Window ready, showing...');
-    screenshotQuestionWindow?.show();
+    if (!screenshotQuestionWindow) return;
+    if (shouldRevealWindowInactive('screenshotQuestion')) {
+      screenshotQuestionWindow.showInactive();
+    } else {
+      screenshotQuestionWindow.show();
+    }
   });
 
-  // Hide on blur (click outside)
+  // Keep reflection capture visible during focus changes from screen capture.
   screenshotQuestionWindow.on('blur', () => {
-    screenshotQuestionWindow?.hide();
+    if (shouldHideWindowOnBlur('screenshotQuestion')) {
+      screenshotQuestionWindow?.hide();
+    }
   });
 
   screenshotQuestionWindow.on('closed', () => {
@@ -2888,7 +2937,9 @@ function toggleScreenshotQuestionWindow() {
   if (screenshotQuestionWindow && screenshotQuestionWindow.isVisible()) {
     screenshotQuestionWindow.hide();
   } else {
-    createScreenshotQuestionWindow();
+    void preparePendingAyahReflectionResult().finally(() => {
+      createScreenshotQuestionWindow();
+    });
   }
 }
 
@@ -3346,7 +3397,7 @@ function setupIPC() {
       watchers?.restart();
     }
 
-    // Re-register hotkeys if hotkey settings changed
+    // Re-register hotkeys if hotkey settings changed (deferred while UI is capturing a new chord)
     if (key.startsWith('hotkeys.')) {
       registerHotkeys();
     }
@@ -3373,6 +3424,14 @@ function setupIPC() {
     }
 
     return store.store;
+  });
+
+  ipcMain.handle('hotkeys-begin-capture', () => {
+    beginHotkeyCapture();
+  });
+
+  ipcMain.handle('hotkeys-end-capture', () => {
+    endHotkeyCapture();
   });
 
   ipcMain.handle('quran-auth-start', () => {
@@ -3452,6 +3511,12 @@ function setupIPC() {
 
   ipcMain.handle('ayah-capture-reflection', async () => {
     return await captureAyahReflection();
+  });
+
+  ipcMain.handle('ayah-pending-reflection-result', () => {
+    const result = pendingAyahReflectionResult;
+    pendingAyahReflectionResult = null;
+    return result;
   });
 
   ipcMain.handle('ayah-save-reflection', async (_event, reflectionId: string) => {
@@ -3771,7 +3836,14 @@ function setupIPC() {
   });
 
   // Show pet chat popup
-  ipcMain.on('show-pet-chat', (_event, message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) => {
+  ipcMain.on('show-pet-chat', (_event, message: {
+    id: string;
+    text: string;
+    quickReplies?: string[];
+    reflectionId?: string;
+    arabicText?: string;
+    footerText?: string;
+  }) => {
     showPetChat(message);
   });
 
@@ -4031,8 +4103,31 @@ function normalizeSettingsValue(key: string, value: unknown): unknown {
   }
 }
 
+/** While > 0, global shortcuts are unregistered so settings UI can capture chords without toggling windows. */
+let hotkeyCaptureSuspendDepth = 0;
+
+function beginHotkeyCapture() {
+  if (hotkeyCaptureSuspendDepth === 0) {
+    globalShortcut.unregisterAll();
+  }
+  hotkeyCaptureSuspendDepth++;
+}
+
+function endHotkeyCapture() {
+  if (hotkeyCaptureSuspendDepth === 0) {
+    return;
+  }
+  hotkeyCaptureSuspendDepth -= 1;
+  if (hotkeyCaptureSuspendDepth === 0) {
+    registerHotkeys();
+  }
+}
+
 // Register global hotkeys from store
 function registerHotkeys() {
+  if (hotkeyCaptureSuspendDepth > 0) {
+    return;
+  }
   // Unregister all first (in case we're re-registering)
   globalShortcut.unregisterAll();
 
@@ -4447,6 +4542,7 @@ if (shouldStartApp) {
   });
 
   app.on('will-quit', () => {
+    hotkeyCaptureSuspendDepth = 0;
     globalShortcut.unregisterAll();
     watchers?.stop();
     stopAutoUpdaterTimers();

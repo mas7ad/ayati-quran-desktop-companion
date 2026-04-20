@@ -654,6 +654,19 @@ export const Assistant: React.FC = () => {
     setQuranStatusMessage('Quran Foundation account disconnected. Local reflections remain on this device.');
   }, []);
 
+  const triggerTestReminderComment = useCallback(async () => {
+    try {
+      const didSendReminder = await window.ayati.forceTimedReminderComment();
+      if (didSendReminder) {
+        window.ayati.closeAssistant();
+        return;
+      }
+      setQuranStatusMessage('Could not send a test reminder right now.');
+    } catch (error) {
+      setQuranStatusMessage(error instanceof Error ? error.message : 'Could not send a test reminder right now.');
+    }
+  }, []);
+
   const closeWindow = useCallback(() => {
     window.ayati.closeAssistant();
   }, []);
@@ -1677,7 +1690,7 @@ export const Assistant: React.FC = () => {
               {isDevEnvironment && (
                 <button
                   onClick={() => {
-                    void window.ayati.forceTimedReminderComment();
+                    void triggerTestReminderComment();
                   }}
                   className="w-full flex items-center justify-between px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors group"
                 >

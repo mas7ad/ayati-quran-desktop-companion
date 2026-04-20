@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
 import { MarkdownMessage } from '../components/MarkdownMessage';
 
+const MIN_REFLECTION_NOTE_CHARS = 6;
+
 interface ChatMessage {
   id: string;
   text: string;
   quickReplies?: string[];
   reflectionId?: string;
+  arabicText?: string;
+  footerText?: string;
 }
 
 const DEFAULT_QUICK_REPLIES = ['Thanks!', 'Tell me more', 'Not now'];
@@ -13,18 +17,24 @@ const DEFAULT_QUICK_REPLIES = ['Thanks!', 'Tell me more', 'Not now'];
 export const PetChat: React.FC = () => {
   const [message, setMessage] = useState<ChatMessage | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isReflectNoteOpen, setIsReflectNoteOpen] = useState(false);
+  const [reflectNoteDraft, setReflectNoteDraft] = useState('');
+  const [reflectNoteError, setReflectNoteError] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const lastSizeRef = useRef<{ width: number; height: number } | null>(null);
   const lastInteractionSentAtRef = useRef(0);
 
   useEffect(() => {
-    // Listen for chat messages from main process
     window.ayati.onPetChatMessage((msg) => {
+      lastSizeRef.current = null;
       setMessage({
         ...msg,
         quickReplies: msg.quickReplies || DEFAULT_QUICK_REPLIES,
       });
       setIsLoading(false);
+      setIsReflectNoteOpen(false);
+      setReflectNoteDraft('');
+      setReflectNoteError(null);
     });
   }, []);
 
@@ -58,7 +68,7 @@ export const PetChat: React.FC = () => {
       cancelAnimationFrame(frame1);
       if (frame2) cancelAnimationFrame(frame2);
     };
-  }, [message, isLoading, reportContentSize]);
+  }, [message, isLoading, isReflectNoteOpen, reflectNoteDraft, reportContentSize]);
 
   useEffect(() => {
     if (!message || !contentRef.current) return;
@@ -78,6 +88,48 @@ export const PetChat: React.FC = () => {
     window.ayati.petChatInteracted();
   }, []);
 
+  const cancelReflectionNote = useCallback(() => {
+    setIsReflectNoteOpen(false);
+    setReflectNoteDraft('');
+    setReflectNoteError(null);
+    window.ayati.petChatReply('dismiss');
+  }, []);
+
+  const saveReflectionNote = useCallback(async () => {
+    if (!message?.reflectionId) return;
+
+    const body = reflectNoteDraft.trim();
+    if (body.length < MIN_REFLECTION_NOTE_CHARS) {
+      setReflectNoteError(`Add at least ${MIN_REFLECTION_NOTE_CHARS} characters.`);
+      return;
+    }
+
+    setIsLoading(true);
+    setReflectNoteError(null);
+    window.ayati.petChatReply('thinking');
+    try {
+      const saved = await window.ayati.saveAyahReflectionNote(message.reflectionId, body);
+      if (!saved) {
+        setReflectNoteError('Could not save this note. Check length (6–10,000 characters) and try again.');
+        window.ayati.petChatReply('curious');
+        return;
+      }
+      setIsReflectNoteOpen(false);
+      setReflectNoteDraft('');
+      setMessage({
+        id: crypto.randomUUID(),
+        text: 'Reflection note saved. You can review it anytime under Reflections in Settings.',
+        quickReplies: ['Got it', 'Not now'],
+      });
+      window.ayati.petChatReply('happy');
+    } catch {
+      setReflectNoteError('Could not save this note. Try again from Reflections.');
+      window.ayati.petChatReply('curious');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [message?.reflectionId, reflectNoteDraft]);
+
   const handleQuickReply = useCallback(async (reply: string) => {
     if (!message) return;
 
@@ -89,6 +141,11 @@ export const PetChat: React.FC = () => {
 
     if (reply === 'Reflect') {
       window.ayati.petChatReply('curious');
+      if (message.reflectionId) {
+        setIsReflectNoteOpen(true);
+        setReflectNoteError(null);
+        return;
+      }
       window.ayati.openAssistant();
       window.ayati.hidePetChat();
       return;
@@ -129,7 +186,6 @@ export const PetChat: React.FC = () => {
     }
 
     if (reply === 'Tell me more') {
-      // Check connection first
       const status = await window.ayati.getClawbotStatus();
       if (!status.connected) {
         setMessage({
@@ -144,7 +200,7 @@ export const PetChat: React.FC = () => {
       window.ayati.petChatReply('thinking');
       try {
         const response = await window.ayati.sendToClawbot(
-          `Tell me more about: ${message.text}`
+          `Tell me more about: ${message.text}`,
         ) as { text?: string };
 
         if (response.text) {
@@ -167,19 +223,19 @@ export const PetChat: React.FC = () => {
       return;
     }
 
-    // "Got it" - just close
     if (reply === 'Got it') {
       window.ayati.petChatReply('dismiss');
       window.ayati.hidePetChat();
       return;
     }
 
-    // "Thanks!" - close with happy reaction
     window.ayati.petChatReply('thanks');
     window.ayati.hidePetChat();
   }, [message]);
 
   if (!message) return null;
+
+  const scrollMaxClass = isReflectNoteOpen || message.arabicText ? 'max-h-[280px]' : 'max-h-[150px]';
 
   return (
     <div className="w-full h-full flex items-end justify-center">
@@ -195,7 +251,7 @@ export const PetChat: React.FC = () => {
           onWheel={notifyInteraction}
         >
           <div className="pet-speech-bubble-panel">
-            <div className="p-3 max-h-[150px] overflow-y-auto">
+            <div className={`p-3 overflow-y-auto ${scrollMaxClass}`}>
               {isLoading ? (
                 <div className="flex gap-1 justify-center py-2">
                   <span className="w-2 h-2 rounded-full bg-[#67E0A3] loading-dot"></span>
@@ -203,18 +259,54 @@ export const PetChat: React.FC = () => {
                   <span className="w-2 h-2 rounded-full bg-[#67E0A3] loading-dot"></span>
                 </div>
               ) : (
-                <div className="text-sm text-neutral-200 leading-relaxed break-words select-text cursor-text">
-                  <MarkdownMessage content={message.text} />
-                </div>
+                <>
+                  <div className="text-sm text-neutral-200 leading-relaxed break-words select-text cursor-text">
+                    <MarkdownMessage content={message.text} />
+                  </div>
+                  {message.arabicText ? (
+                    <p className="pet-chat-arabic" dir="rtl" lang="ar" translate="no">
+                      {message.arabicText}
+                    </p>
+                  ) : null}
+                  {message.footerText ? (
+                    <p className="pet-chat-translation">{message.footerText}</p>
+                  ) : null}
+                  {isReflectNoteOpen && message.reflectionId ? (
+                    <div className="mt-3">
+                      <label htmlFor="pet-chat-reflect-note" className="sr-only">
+                        Your reflection
+                      </label>
+                      <textarea
+                        id="pet-chat-reflect-note"
+                        className="pet-chat-reflect-field"
+                        placeholder="Write your reflection (saved with this ayah)…"
+                        value={reflectNoteDraft}
+                        onChange={(e) => {
+                          setReflectNoteDraft(e.target.value);
+                          setReflectNoteError(null);
+                        }}
+                        rows={4}
+                        autoFocus
+                      />
+                      {reflectNoteError ? (
+                        <p className="pet-chat-reflect-hint text-amber-200/90">{reflectNoteError}</p>
+                      ) : (
+                        <p className="pet-chat-reflect-hint">
+                          {MIN_REFLECTION_NOTE_CHARS}+ characters. Saved to Reflections.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                </>
               )}
             </div>
 
-            {/* Quick Replies */}
-            {!isLoading && message.quickReplies && (
+            {!isLoading && !isReflectNoteOpen && message.quickReplies && (
               <div className="flex gap-2 px-3 pb-2 pt-2 flex-wrap justify-center border-t border-white/5">
                 {message.quickReplies.map((reply) => (
                   <button
                     key={reply}
+                    type="button"
                     onClick={() => handleQuickReply(reply)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67E0A3]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f0f] ${
                       reply === 'Not now'
@@ -225,6 +317,25 @@ export const PetChat: React.FC = () => {
                     {reply}
                   </button>
                 ))}
+              </div>
+            )}
+
+            {!isLoading && isReflectNoteOpen && (
+              <div className="flex gap-2 px-3 pb-2 pt-2 flex-wrap justify-center border-t border-white/5">
+                <button
+                  type="button"
+                  onClick={() => void saveReflectionNote()}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67E0A3]/60 bg-[#67E0A3]/10 border border-[#67E0A3]/20 text-[#67E0A3] hover:bg-[#67E0A3]/20"
+                >
+                  Save reflection
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelReflectionNote}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 bg-white/5 border border-white/10 text-neutral-400 hover:bg-white/10"
+                >
+                  Cancel
+                </button>
               </div>
             )}
           </div>

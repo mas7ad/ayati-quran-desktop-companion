@@ -111,6 +111,11 @@ interface ReflectionFeedback {
   createdAt: number;
 }
 
+interface PendingAyahReflectionResult {
+  reflection?: AyahReflection;
+  error?: string;
+}
+
 interface AyahDaySummary {
   date: string;
   reflectionCount: number;
@@ -264,11 +269,25 @@ interface AyatiAPI {
   toggleScreenshotQuestion: () => void;
   closeScreenshotQuestion: () => void;
   dragPet: (deltaX: number, deltaY: number) => void;
-  showPetChat: (message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) => void;
+  showPetChat: (message: {
+    id: string;
+    text: string;
+    quickReplies?: string[];
+    reflectionId?: string;
+    arabicText?: string;
+    footerText?: string;
+  }) => void;
   hidePetChat: () => void;
   resizePetChat: (width: number, height: number) => void;
   petChatInteracted: () => void;
-  onPetChatMessage: (callback: (message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) => void) => void;
+  onPetChatMessage: (callback: (message: {
+    id: string;
+    text: string;
+    quickReplies?: string[];
+    reflectionId?: string;
+    arabicText?: string;
+    footerText?: string;
+  }) => void) => void;
   petChatReply: (reply: string) => void;
   onPetChatReply: (callback: (reply: string) => void) => void;
   openExternal: (url: string) => void;
@@ -280,6 +299,8 @@ interface AyatiAPI {
   previewWorkspaceFile: (relativePath?: string) => Promise<WorkspacePreviewResult>;
   getSettings: () => Promise<unknown>;
   updateSettings: (key: string, value: unknown) => Promise<unknown>;
+  beginHotkeyCapture: () => Promise<void>;
+  endHotkeyCapture: () => Promise<void>;
   getUpdateState: () => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
@@ -290,6 +311,7 @@ interface AyatiAPI {
   getQuranAuthStatus: () => Promise<QuranAuthStatus>;
   disconnectQuranAccount: () => Promise<boolean>;
   captureAyahReflection: () => Promise<AyahReflection>;
+  getPendingAyahReflectionResult: () => Promise<PendingAyahReflectionResult | null>;
   saveAyahReflection: (reflectionId: string) => Promise<AyahReflection | null>;
   getAyahReflectionHistory: () => Promise<AyahReflection[]>;
   deleteAyahReflection: (reflectionId: string) => Promise<boolean>;

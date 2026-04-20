@@ -18,6 +18,7 @@ const MIN_ACTIONABLE_CONFIDENCE = 0.58;
 const DEFAULT_NUDGE_COOLDOWN_MINUTES = 15;
 const DEFAULT_MAX_NUDGES_PER_DAY = 8;
 const DEFAULT_TIMED_REMINDER_MINUTES = 15;
+const DEFAULT_TIMED_REMINDER_FETCH_TIMEOUT_MS = 700;
 const TIMED_REMINDER_REFLECTION = 'Pause for a Quran reminder and let this ayah reset the next moment.';
 const TIMED_REMINDER_REASON = 'This reminder was shown on the interval you set.';
 
@@ -39,6 +40,10 @@ export interface ContextualNudgeResult {
   message: {
     id: string;
     text: string;
+    /** Arabic ayah text; shown RTL in the pet chat bubble (like Reflect on screen). */
+    arabicText?: string;
+    /** English translation shown below the Arabic line. */
+    footerText?: string;
     trigger: 'app_switch' | 'timer';
     quickReplies: string[];
     reflectionId: string;
@@ -53,6 +58,7 @@ export interface TimedQuranReminderInput {
   nudgeState: AyahLensState['nudgeState'];
   recentVerseKeys: string[];
   fetchVerseContent: (verseKey: string) => Promise<QuranVerseContent>;
+  verseFetchTimeoutMs?: number;
 }
 
 interface ClassifiedContext {
@@ -356,12 +362,12 @@ function buildReflection(
   };
 }
 
-function buildPopupText(label: string, verse: QuranVerseContent): string {
-  return `Looks like ${label}. A fitting reminder: "${verse.translation}" - ${verse.verseKey}\n\nReflect on this?`;
+function buildPopupIntro(label: string, verse: QuranVerseContent): string {
+  return `Looks like ${label}. A fitting reminder — **${verse.surahName} · ${verse.verseKey}**`;
 }
 
-function buildTimedReminderText(verse: QuranVerseContent): string {
-  return `Time for a Quran reminder: "${verse.translation}" - ${verse.verseKey}\n\nReflect on this?`;
+function buildTimedReminderIntro(verse: QuranVerseContent): string {
+  return `Time for a Quran reminder — **${verse.surahName} · ${verse.verseKey}**`;
 }
 
 function getTimedReminderInsight(): ScreenInsight {
@@ -376,6 +382,26 @@ function getTimedReminderInsight(): ScreenInsight {
     overallConfidence: 0.72,
     isSensitive: false,
   };
+}
+
+async function fetchTimedReminderVerseContent(input: TimedQuranReminderInput, verseKey: string): Promise<QuranVerseContent> {
+  const timeoutMs = Math.max(1, input.verseFetchTimeoutMs ?? DEFAULT_TIMED_REMINDER_FETCH_TIMEOUT_MS);
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      input.fetchVerseContent(verseKey),
+      new Promise<QuranVerseContent>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error('Timed Quran reminder content fetch timed out.'));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 export async function buildContextualQuranNudge(input: ContextualNudgeInput): Promise<ContextualNudgeResult | null> {
@@ -403,7 +429,9 @@ export async function buildContextualQuranNudge(input: ContextualNudgeInput): Pr
     nextState: getNextNudgeState(normalizedState, input.now, classified.appThemeKey),
     message: {
       id: randomUUID(),
-      text: buildPopupText(classified.label, verse),
+      text: buildPopupIntro(classified.label, verse),
+      arabicText: verse.arabicText,
+      footerText: verse.translation,
       trigger: 'app_switch',
       quickReplies: ['Reflect', 'Save', 'Not now'],
       reflectionId: reflection.id,
@@ -422,7 +450,7 @@ export async function buildTimedQuranReminder(input: TimedQuranReminderInput): P
 
   let verse: QuranVerseContent;
   try {
-    verse = await input.fetchVerseContent(verseKey);
+    verse = await fetchTimedReminderVerseContent(input, verseKey);
   } catch {
     verse = getFallbackVerseContent(verseKey);
   }
@@ -437,7 +465,9 @@ export async function buildTimedQuranReminder(input: TimedQuranReminderInput): P
     nextState: getNextTimedReminderState(normalizedState, input.now),
     message: {
       id: randomUUID(),
-      text: buildTimedReminderText(verse),
+      text: buildTimedReminderIntro(verse),
+      arabicText: verse.arabicText,
+      footerText: verse.translation,
       trigger: 'timer',
       quickReplies: ['Reflect', 'Save', 'Not now'],
       reflectionId: reflection.id,

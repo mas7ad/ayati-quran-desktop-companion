@@ -31,6 +31,8 @@ function createMockAyati() {
     onboardingComplete: vi.fn().mockResolvedValue(true),
     getScreenCapturePermission: vi.fn().mockResolvedValue('granted'),
     checkAccessibilityPermission: vi.fn().mockResolvedValue(true),
+    beginHotkeyCapture: vi.fn().mockResolvedValue(undefined),
+    endHotkeyCapture: vi.fn().mockResolvedValue(undefined),
   } satisfies Partial<Window['ayati']>;
 }
 

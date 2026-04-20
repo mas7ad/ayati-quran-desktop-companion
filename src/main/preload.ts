@@ -24,12 +24,26 @@ contextBridge.exposeInMainWorld('ayati', {
   dragPet: (deltaX: number, deltaY: number) => ipcRenderer.send('pet-drag', deltaX, deltaY),
   playPetWakeFlight: () => ipcRenderer.invoke('pet-wake-flight'),
   // Pet chat popup
-  showPetChat: (message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) =>
+  showPetChat: (message: {
+    id: string;
+    text: string;
+    quickReplies?: string[];
+    reflectionId?: string;
+    arabicText?: string;
+    footerText?: string;
+  }) =>
     ipcRenderer.send('show-pet-chat', message),
   hidePetChat: () => ipcRenderer.send('hide-pet-chat'),
   resizePetChat: (width: number, height: number) => ipcRenderer.send('resize-pet-chat', width, height),
   petChatInteracted: () => ipcRenderer.send('pet-chat-interacted'),
-  onPetChatMessage: (callback: (message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) => void) => {
+  onPetChatMessage: (callback: (message: {
+    id: string;
+    text: string;
+    quickReplies?: string[];
+    reflectionId?: string;
+    arabicText?: string;
+    footerText?: string;
+  }) => void) => {
     ipcRenderer.on('chat-message', (_event, message) => callback(message));
   },
   petChatReply: (reply: string) => ipcRenderer.send('pet-chat-reply', reply),
@@ -49,6 +63,8 @@ contextBridge.exposeInMainWorld('ayati', {
   // Settings
   getSettings: () => ipcRenderer.invoke('get-settings'),
   updateSettings: (key: string, value: unknown) => ipcRenderer.invoke('update-settings', key, value),
+  beginHotkeyCapture: () => ipcRenderer.invoke('hotkeys-begin-capture'),
+  endHotkeyCapture: () => ipcRenderer.invoke('hotkeys-end-capture'),
 
   // Updates
   getUpdateState: () => ipcRenderer.invoke('update-get-state'),
@@ -65,6 +81,7 @@ contextBridge.exposeInMainWorld('ayati', {
   getQuranAuthStatus: () => ipcRenderer.invoke('quran-auth-status'),
   disconnectQuranAccount: () => ipcRenderer.invoke('quran-auth-disconnect'),
   captureAyahReflection: () => ipcRenderer.invoke('ayah-capture-reflection'),
+  getPendingAyahReflectionResult: () => ipcRenderer.invoke('ayah-pending-reflection-result'),
   saveAyahReflection: (reflectionId: string) => ipcRenderer.invoke('ayah-save-reflection', reflectionId),
   getAyahReflectionHistory: () => ipcRenderer.invoke('ayah-history'),
   deleteAyahReflection: (reflectionId: string) => ipcRenderer.invoke('ayah-delete-reflection', reflectionId),
@@ -352,6 +369,11 @@ export interface ReflectionFeedback {
   createdAt: number;
 }
 
+export interface PendingAyahReflectionResult {
+  reflection?: AyahReflection;
+  error?: string;
+}
+
 export interface AyahDaySummary {
   date: string;
   reflectionCount: number;
@@ -490,6 +512,15 @@ export interface DesktopUpdateCheckResult {
   state: DesktopUpdateState;
 }
 
+export interface PetChatMessagePayload {
+  id: string;
+  text: string;
+  quickReplies?: string[];
+  reflectionId?: string;
+  arabicText?: string;
+  footerText?: string;
+}
+
 export interface AyatiAPI {
   toggleAssistant: () => void;
   openAssistant: () => void;
@@ -507,11 +538,11 @@ export interface AyatiAPI {
   askAboutScreen: (question: string, imageDataUrl: string) => Promise<unknown>;
   dragPet: (deltaX: number, deltaY: number) => void;
   playPetWakeFlight: () => Promise<void>;
-  showPetChat: (message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) => void;
+  showPetChat: (message: PetChatMessagePayload) => void;
   hidePetChat: () => void;
   resizePetChat: (width: number, height: number) => void;
   petChatInteracted: () => void;
-  onPetChatMessage: (callback: (message: { id: string; text: string; quickReplies?: string[]; reflectionId?: string }) => void) => void;
+  onPetChatMessage: (callback: (message: PetChatMessagePayload) => void) => void;
   petChatReply: (reply: string) => void;
   onPetChatReply: (callback: (reply: string) => void) => void;
   openExternal: (url: string) => void;
@@ -533,6 +564,7 @@ export interface AyatiAPI {
   getQuranAuthStatus: () => Promise<QuranAuthStatus>;
   disconnectQuranAccount: () => Promise<boolean>;
   captureAyahReflection: () => Promise<AyahReflection>;
+  getPendingAyahReflectionResult: () => Promise<PendingAyahReflectionResult | null>;
   saveAyahReflection: (reflectionId: string) => Promise<AyahReflection | null>;
   getAyahReflectionHistory: () => Promise<AyahReflection[]>;
   deleteAyahReflection: (reflectionId: string) => Promise<boolean>;

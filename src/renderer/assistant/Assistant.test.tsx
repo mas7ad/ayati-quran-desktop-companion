@@ -79,6 +79,9 @@ function createMockAyati() {
     saveChatHistory: vi.fn(),
     removeAllListeners: vi.fn(),
     closeAssistant: vi.fn(),
+    beginHotkeyCapture: vi.fn().mockResolvedValue(undefined),
+    endHotkeyCapture: vi.fn().mockResolvedValue(undefined),
+    updateSettings: vi.fn().mockResolvedValue({}),
   } satisfies Partial<Window['ayati']>;
 }
 
@@ -204,5 +207,8 @@ describe('Assistant developer settings', () => {
     await userEvent.click(await screen.findByRole('button', { name: /test reminder comment/i }));
 
     expect(ayati.forceTimedReminderComment).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(ayati.closeAssistant).toHaveBeenCalledTimes(1);
+    });
   });
 });

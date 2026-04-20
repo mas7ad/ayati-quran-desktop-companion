@@ -25,6 +25,42 @@ function getSaveLabel(reflection: AyahReflection, isSaving: boolean): string {
 }
 
 type ActionKey = 'tafsir' | 'audio' | 'note' | 'collection' | 'feedback' | 'alternate' | 'share';
+const TAFSIR_PARAGRAPH_TARGET_LENGTH = 170;
+
+export function getTafsirParagraphs(text: string): string[] {
+  const blocks = text
+    .split(/\n{2,}/)
+    .map((block) => block.replace(/\s+/g, ' '))
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  const paragraphs: string[] = [];
+  for (const block of blocks.length > 0 ? blocks : [text.trim()]) {
+    const sentences = block.match(/[^.!?؟۔]+[.!?؟۔]+["')\]]*|[^.!?؟۔]+$/g) ?? [block];
+    let currentParagraph = '';
+
+    for (const sentence of sentences) {
+      const cleanSentence = sentence.replace(/\s+/g, ' ').trim();
+      if (!cleanSentence) continue;
+
+      const nextParagraph = currentParagraph
+        ? `${currentParagraph} ${cleanSentence}`
+        : cleanSentence;
+      if (currentParagraph && nextParagraph.length > TAFSIR_PARAGRAPH_TARGET_LENGTH) {
+        paragraphs.push(currentParagraph);
+        currentParagraph = cleanSentence;
+      } else {
+        currentParagraph = nextParagraph;
+      }
+    }
+
+    if (currentParagraph) {
+      paragraphs.push(currentParagraph);
+    }
+  }
+
+  return paragraphs.length > 0 ? paragraphs : [text.trim()].filter(Boolean);
+}
 
 export function AyahVerseCard({
   reflection,
@@ -45,6 +81,7 @@ export function AyahVerseCard({
   const [noteBody, setNoteBody] = useState(reflection.note?.body ?? '');
   const [busyAction, setBusyAction] = useState<ActionKey | null>(null);
   const [statusMessage, setStatusMessage] = useState('');
+  const tafsirParagraphs = reflection.tafsir?.text ? getTafsirParagraphs(reflection.tafsir.text) : [];
 
   const runAction = async (key: ActionKey, action?: () => Promise<void> | void, successMessage?: string) => {
     if (!action) return;
@@ -137,7 +174,15 @@ export function AyahVerseCard({
             <strong>Tafsir</strong>
             {reflection.tafsir?.resourceName && <span>{reflection.tafsir.resourceName}</span>}
           </div>
-          <p>{reflection.tafsir?.text ?? (busyAction === 'tafsir' ? 'Loading tafsir...' : 'Tafsir is not available yet.')}</p>
+          {reflection.tafsir?.text ? (
+            <div className="ayah-tafsir-body">
+              {tafsirParagraphs.map((paragraph, index) => (
+                <p className="ayah-tafsir-paragraph" key={`${index}-${paragraph}`}>{paragraph}</p>
+              ))}
+            </div>
+          ) : (
+            <p>{busyAction === 'tafsir' ? 'Loading tafsir...' : 'Tafsir is not available yet.'}</p>
+          )}
         </section>
       )}
 

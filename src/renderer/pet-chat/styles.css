@@ -19,6 +19,48 @@
   border-radius: 18px;
 }
 
+.pet-chat-arabic {
+  margin-top: 10px;
+  color: #e8edf0;
+  font-family: 'Amiri', 'Scheherazade New', 'Geeza Pro', 'Times New Roman', serif;
+  font-size: 22px;
+  line-height: 1.75;
+  text-align: right;
+}
+
+.pet-chat-translation {
+  margin-top: 10px;
+  color: #d4d4d8;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.pet-chat-reflect-field {
+  margin-top: 10px;
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  color: #e5e5e5;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 8px 10px;
+}
+
+.pet-chat-reflect-field:focus {
+  outline: none;
+  border-color: rgba(103, 224, 163, 0.45);
+  box-shadow: 0 0 0 1px rgba(103, 224, 163, 0.2);
+}
+
+.pet-chat-reflect-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(245, 245, 245, 0.45);
+}
+
 .pet-speech-bubble-tail {
   position: absolute;
   left: 50%;
