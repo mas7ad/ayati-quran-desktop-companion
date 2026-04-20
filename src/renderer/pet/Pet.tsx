@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import bodyUrl from '../../../assets/character/body.svg';
 import headUrl from '../../../assets/character/head.svg';
 import leftHandUrl from '../../../assets/character/left-hand.svg';
-import leftWingUrl from '../../../assets/character/left-wing.svg';
+
 import legUrl from '../../../assets/character/leg.svg';
 import rightHandUrl from '../../../assets/character/right-hand.svg';
-import rightWingUrl from '../../../assets/character/right-wing.svg';
+
 import { TutorialOverlay } from './TutorialOverlay';
 
 type Mood = 'idle' | 'happy' | 'curious' | 'sleeping' | 'thinking' | 'excited' | 'doze' | 'startle' | 'proud' | 'mad' | 'spin' | 'mouth_o';
@@ -77,16 +77,8 @@ interface CharacterSvgProps {
   pupilOffset: { x: number; y: number } | null;
 }
 
-const CharacterSvg: React.FC<CharacterSvgProps> = ({ pupilOffset }) => (
+export const CharacterSvg: React.FC<CharacterSvgProps> = ({ pupilOffset }) => (
   <svg viewBox="0 0 128 128" data-testid="ayah-character-pet" aria-hidden="true">
-
-    <g className="left-claw character-left-wing" data-testid="character-left-wing-layer">
-      <image className="character-layer" href={leftWingUrl} x="-16" y="44" width="64" height="64" />
-    </g>
-
-    <g className="right-claw character-right-wing" data-testid="character-right-wing-layer">
-      <image className="character-layer" href={rightWingUrl} x="76" y="44" width="64" height="64" />
-    </g>
 
     <g className="body-group">
       <image

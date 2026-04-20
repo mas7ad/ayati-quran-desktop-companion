@@ -67,6 +67,7 @@ import { getDefaultClawBotModel } from './ai-provider-defaults';
 import { DEFAULT_HOTKEYS, sanitizeAccelerator } from './hotkeys';
 import { getAiProviderConfig } from './ai-providers';
 import { getWindowPositionNearAnchor } from './window-positioning';
+import { enforceSingleInstanceApp } from './single-instance';
 import {
   createConfiguredUpdateState,
   createInitialUpdateState,
@@ -162,6 +163,7 @@ const DEV_WINDOW_BORDER_CSS = `
   }
 `;
 const debugBorderStyleKeys = new WeakMap<BrowserWindow, string>();
+const shouldStartApp = enforceSingleInstanceApp(app, getSingleInstanceFocusWindow);
 
 function getAssetPath(fileName: string): string {
   return isDev
@@ -260,6 +262,19 @@ function applyDebugWindowBordersToAllWindows(): void {
     if (!window || window.isDestroyed()) continue;
     void applyDebugWindowBorder(window);
   }
+}
+
+function getSingleInstanceFocusWindow(): BrowserWindow | null {
+  const candidates = [
+    assistantWindow,
+    chatbarWindow,
+    screenshotQuestionWindow,
+    workspaceBrowserWindow,
+    onboardingWindow,
+    petWindow,
+  ];
+
+  return candidates.find((window): window is BrowserWindow => Boolean(window && !window.isDestroyed())) ?? null;
 }
 
 function getAyahLensState(): AyahLensState {
@@ -404,7 +419,7 @@ function getSafeErrorMessage(error: unknown): string {
   return 'Quran Foundation content API failed. Try again later.';
 }
 
-async function getQuranContentAccessToken(): Promise<string> {
+async function getQuranContentAccessToken(): Promise<string | null> {
   const userToken = await getQuranUserAccessToken();
   if (userToken) return userToken;
 
@@ -414,15 +429,22 @@ async function getQuranContentAccessToken(): Promise<string> {
     return contentToken;
   }
 
-  const tokens = await getQuranClient().requestContentToken();
-  setAyahLensState({
-    ...state,
-    contentAuth: {
-      encryptedAccessToken: encryptSecret(tokens.accessToken),
-      expiresAt: tokens.expiresAt,
-    },
-  });
-  return tokens.accessToken;
+  try {
+    const tokens = await getQuranClient().requestContentToken();
+    setAyahLensState({
+      ...state,
+      contentAuth: {
+        encryptedAccessToken: encryptSecret(tokens.accessToken),
+        expiresAt: tokens.expiresAt,
+      },
+    });
+    return tokens.accessToken;
+  } catch (error) {
+    if (error instanceof QuranFoundationError && error.code === 'missing_config') {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function fetchVerseContentForReflection(verseKey: string): Promise<QuranVerseContent> {
@@ -4372,69 +4394,71 @@ function setupTray() {
 }
 
 // App lifecycle
-if (process.defaultApp) {
-  if (process.argv.length >= 2) {
-    app.setAsDefaultProtocolClient('ayati', process.execPath, [path.resolve(process.argv[1])]);
-  }
-} else {
-  app.setAsDefaultProtocolClient('ayati');
-}
-
-app.on('open-url', (event, url) => {
-  event.preventDefault();
-  if (!url.startsWith('ayati://oauth/callback')) return;
-  const targetWindow = assistantWindow && !assistantWindow.isDestroyed() ? assistantWindow : null;
-  targetWindow?.webContents.send('ayah-oauth-callback', url);
-});
-
-app.whenReady().then(async () => {
-  applyDockIcon();
-  setupIPC();
-  setupAutoUpdater();
-  setupTray();
-
-  // Check onboarding status
-  const onboardingCompleted = store.get('onboarding.completed') as boolean;
-  const onboardingSkipped = store.get('onboarding.skipped') as boolean;
-
-  console.log('[Onboarding] Status check:', { onboardingCompleted, onboardingSkipped });
-
-  if (!onboardingCompleted && !onboardingSkipped) {
-    // Show onboarding wizard
-    console.log('[Onboarding] Showing onboarding window...');
-    await createOnboardingWindow();
-    console.log('[Onboarding] Window created');
+if (shouldStartApp) {
+  if (process.defaultApp) {
+    if (process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient('ayati', process.execPath, [path.resolve(process.argv[1])]);
+    }
   } else {
-    // Start main app directly
-    console.log('[Onboarding] Skipping onboarding, starting main app');
-    startMainApp();
+    app.setAsDefaultProtocolClient('ayati');
   }
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createPetWindow();
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    if (!url.startsWith('ayati://oauth/callback')) return;
+    const targetWindow = assistantWindow && !assistantWindow.isDestroyed() ? assistantWindow : null;
+    targetWindow?.webContents.send('ayah-oauth-callback', url);
+  });
+
+  app.whenReady().then(async () => {
+    applyDockIcon();
+    setupIPC();
+    setupAutoUpdater();
+    setupTray();
+
+    // Check onboarding status
+    const onboardingCompleted = store.get('onboarding.completed') as boolean;
+    const onboardingSkipped = store.get('onboarding.skipped') as boolean;
+
+    console.log('[Onboarding] Status check:', { onboardingCompleted, onboardingSkipped });
+
+    if (!onboardingCompleted && !onboardingSkipped) {
+      // Show onboarding wizard
+      console.log('[Onboarding] Showing onboarding window...');
+      await createOnboardingWindow();
+      console.log('[Onboarding] Window created');
+    } else {
+      // Start main app directly
+      console.log('[Onboarding] Skipping onboarding, starting main app');
+      startMainApp();
+    }
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createPetWindow();
+      }
+    });
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit();
     }
   });
-});
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
-
-app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
-  watchers?.stop();
-  stopAutoUpdaterTimers();
-  stopTimedQuranReminders();
-  stopIdleBehaviors();
-  if (idleCheckInterval) {
-    clearInterval(idleCheckInterval);
-  }
-  stopAttentionSeeker();
-  if (moveAnimation) {
-    clearInterval(moveAnimation);
-  }
-  tutorialManager.destroy();
-});
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll();
+    watchers?.stop();
+    stopAutoUpdaterTimers();
+    stopTimedQuranReminders();
+    stopIdleBehaviors();
+    if (idleCheckInterval) {
+      clearInterval(idleCheckInterval);
+    }
+    stopAttentionSeeker();
+    if (moveAnimation) {
+      clearInterval(moveAnimation);
+    }
+    tutorialManager.destroy();
+  });
+}

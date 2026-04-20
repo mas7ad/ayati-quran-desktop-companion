@@ -9,6 +9,7 @@ export interface QuranRuntimeConfigEnv {
   QURAN_FOUNDATION_ENV?: string;
   QURAN_AUTH_BASE_URL?: string;
   QURAN_API_BASE_URL?: string;
+  QURAN_CONTENT_API_BASE_URL?: string;
 }
 
 export interface QuranRuntimeConfig {
@@ -17,6 +18,7 @@ export interface QuranRuntimeConfig {
   redirectUri: string;
   authBaseUrl?: string;
   apiBaseUrl?: string;
+  contentApiBaseUrl?: string;
 }
 
 interface ResolveQuranClientConfigOptions {
@@ -35,6 +37,10 @@ function getDefaultApiBaseUrl(environment?: string): string {
   return environment === 'prelive'
     ? 'https://apis-prelive.quran.foundation'
     : 'https://apis.quran.foundation';
+}
+
+function getDefaultContentApiBaseUrl(): string {
+  return 'https://api.quran.com/api/v4';
 }
 
 function pickNonBlank(...values: Array<string | null | undefined>): string | undefined {
@@ -62,6 +68,7 @@ export function resolveQuranClientConfig({
     : (env.QURAN_FOUNDATION_ENV || setupConfig.environment));
   const authBaseUrl = pickNonBlank(env.QURAN_AUTH_BASE_URL) ?? getDefaultAuthBaseUrl(environment);
   const apiBaseUrl = pickNonBlank(env.QURAN_API_BASE_URL) ?? getDefaultApiBaseUrl(environment);
+  const contentApiBaseUrl = pickNonBlank(env.QURAN_CONTENT_API_BASE_URL) ?? getDefaultContentApiBaseUrl();
 
   return {
     clientId: pickNonBlank(setupConfig.clientId, envClientId) ?? '',
@@ -69,5 +76,6 @@ export function resolveQuranClientConfig({
     redirectUri: pickNonBlank(setupConfig.redirectUri, env.QURAN_REDIRECT_URI) ?? 'ayati://oauth/callback',
     authBaseUrl,
     apiBaseUrl,
+    contentApiBaseUrl,
   };
 }

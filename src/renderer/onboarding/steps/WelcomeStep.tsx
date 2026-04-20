@@ -2,6 +2,9 @@ import type { OnboardingData } from '../Onboarding';
 import { OnboardingIcon } from '../OnboardingIcon';
 import appIconUrl from '../../../../assets/icon.png';
 
+import { CharacterSvg } from '../../pet/Pet';
+import '../../pet/styles.css';
+
 interface Props {
   data: OnboardingData;
   updateData: (updates: Partial<OnboardingData>) => void;
@@ -15,13 +18,9 @@ export const WelcomeStep: React.FC<Props> = () => {
     <div className="min-h-full px-12 flex flex-col items-center justify-center text-center py-8">
       <div className="mb-10 relative">
         <div className="relative p-1 rounded-[42px] bg-gradient-to-b from-white to-[#7CF0BD]/20 border border-[#67E0A3]/15">
-          <img
-            src={appIconUrl}
-            alt="Ayati Mascot"
-            width={160}
-            height={160}
-            className="h-40 w-40 rounded-[38px] object-cover"
-          />
+          <div className="h-40 w-40 rounded-[38px] overflow-hidden bg-white/50 flex items-center justify-center lobster-container state-idle">
+            <CharacterSvg pupilOffset={null} />
+          </div>
         </div>
       </div>
 

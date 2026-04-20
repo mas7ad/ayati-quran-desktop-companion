@@ -30,6 +30,7 @@ describe('resolveQuranClientConfig', () => {
       redirectUri: 'ayati://oauth/callback',
       authBaseUrl: 'https://prelive-oauth2.quran.foundation',
       apiBaseUrl: 'https://apis-prelive.quran.foundation',
+      contentApiBaseUrl: 'https://api.quran.com/api/v4',
     });
   });
 
@@ -42,6 +43,7 @@ describe('resolveQuranClientConfig', () => {
         QURAN_REDIRECT_URI: 'ayati://oauth/callback',
         QURAN_AUTH_BASE_URL: 'https://auth.example.test',
         QURAN_API_BASE_URL: 'https://api.example.test',
+        QURAN_CONTENT_API_BASE_URL: 'https://content.example.test/api/v4',
       },
       decryptSecret: () => null,
     });
@@ -52,6 +54,7 @@ describe('resolveQuranClientConfig', () => {
       redirectUri: 'ayati://oauth/callback',
       authBaseUrl: 'https://auth.example.test',
       apiBaseUrl: 'https://api.example.test',
+      contentApiBaseUrl: 'https://content.example.test/api/v4',
     });
   });
 
@@ -67,6 +70,7 @@ describe('resolveQuranClientConfig', () => {
 
     expect(config.authBaseUrl).toBe('https://oauth2.quran.foundation');
     expect(config.apiBaseUrl).toBe('https://apis.quran.foundation');
+    expect(config.contentApiBaseUrl).toBe('https://api.quran.com/api/v4');
   });
 
   it('does not provide client credentials when setup and env credentials are blank', () => {
@@ -81,5 +85,6 @@ describe('resolveQuranClientConfig', () => {
     expect(config.redirectUri).toBe('ayati://oauth/callback');
     expect(config.authBaseUrl).toBe('https://prelive-oauth2.quran.foundation');
     expect(config.apiBaseUrl).toBe('https://apis-prelive.quran.foundation');
+    expect(config.contentApiBaseUrl).toBe('https://api.quran.com/api/v4');
   });
 });

@@ -16,6 +16,7 @@ interface QuranFoundationClientOptions {
   redirectUri: string;
   authBaseUrl?: string;
   apiBaseUrl?: string;
+  contentApiBaseUrl?: string;
   fetchImpl?: FetchLike;
 }
 
@@ -71,6 +72,10 @@ function getDefaultApiBaseUrl(): string {
   return process.env.QURAN_FOUNDATION_ENV === 'prelive'
     ? 'https://apis-prelive.quran.foundation'
     : 'https://apis.quran.foundation';
+}
+
+function getDefaultContentApiBaseUrl(): string {
+  return 'https://api.quran.com/api/v4';
 }
 
 function sanitizeApiError(status: number): QuranFoundationError {
@@ -160,6 +165,7 @@ export class QuranFoundationClient {
   private readonly redirectUri: string;
   private readonly authBaseUrl: string;
   private readonly apiBaseUrl: string;
+  private readonly contentApiBaseUrl: string;
   private readonly fetchImpl: FetchLike;
 
   constructor(options: QuranFoundationClientOptions) {
@@ -168,6 +174,7 @@ export class QuranFoundationClient {
     this.redirectUri = options.redirectUri;
     this.authBaseUrl = options.authBaseUrl ?? getDefaultAuthBaseUrl();
     this.apiBaseUrl = options.apiBaseUrl ?? getDefaultApiBaseUrl();
+    this.contentApiBaseUrl = options.contentApiBaseUrl ?? getDefaultContentApiBaseUrl();
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -243,11 +250,11 @@ export class QuranFoundationClient {
   }
 
   async fetchVerseContent(
-    accessToken: string,
+    accessToken: string | null,
     verseKey: string,
     translationId: number,
   ): Promise<QuranVerseContent> {
-    const url = new URL(`/content/api/v4/verses/by_key/${encodeURIComponent(verseKey)}`, this.apiBaseUrl);
+    const url = this.getContentUrl(`verses/by_key/${encodeURIComponent(verseKey)}`);
     url.searchParams.set('translations', String(translationId));
     url.searchParams.set('fields', 'text_uthmani');
     url.searchParams.set('words', 'false');
@@ -320,13 +327,12 @@ export class QuranFoundationClient {
   }
 
   async fetchTafsir(
-    accessToken: string,
+    accessToken: string | null,
     verseKey: string,
     resourceId: number,
   ): Promise<QuranTafsirSnippet> {
-    const url = new URL(
-      `/content/api/v4/tafsirs/${encodeURIComponent(String(resourceId))}/by_ayah/${encodeURIComponent(verseKey)}`,
-      this.apiBaseUrl,
+    const url = this.getContentUrl(
+      `tafsirs/${encodeURIComponent(String(resourceId))}/by_ayah/${encodeURIComponent(verseKey)}`,
     );
     url.searchParams.set('fields', 'resource_name,language_name');
 
@@ -366,16 +372,16 @@ export class QuranFoundationClient {
   }
 
   async fetchAyahAudio(
-    accessToken: string,
+    accessToken: string | null,
     verseKey: string,
     recitationId: number,
     reciterName?: string,
   ): Promise<QuranAudioFile> {
-    const url = new URL(
-      `/content/api/v4/recitations/${encodeURIComponent(String(recitationId))}/by_ayah/${encodeURIComponent(verseKey)}`,
-      this.apiBaseUrl,
+    const url = this.getContentUrl(
+      `recitations/${encodeURIComponent(String(recitationId))}/by_ayah/${encodeURIComponent(verseKey)}`,
     );
     url.searchParams.set('fields', 'url,duration,verse_key');
+    url.searchParams.set('per_page', '1');
 
     const response = await this.fetchImpl(url.toString(), {
       method: 'GET',
@@ -406,8 +412,8 @@ export class QuranFoundationClient {
     };
   }
 
-  async fetchTafsirResources(accessToken: string): Promise<Array<{ id: number; name: string; languageName?: string }>> {
-    const response = await this.fetchImpl(new URL('/content/api/v4/resources/tafsirs', this.apiBaseUrl).toString(), {
+  async fetchTafsirResources(accessToken: string | null): Promise<Array<{ id: number; name: string; languageName?: string }>> {
+    const response = await this.fetchImpl(this.getContentUrl('resources/tafsirs').toString(), {
       method: 'GET',
       headers: this.getApiHeaders(accessToken),
     });
@@ -429,8 +435,8 @@ export class QuranFoundationClient {
       .filter((resource) => Number.isInteger(resource.id) && resource.id > 0 && resource.name);
   }
 
-  async fetchRecitationResources(accessToken: string): Promise<Array<{ id: number; name: string }>> {
-    const response = await this.fetchImpl(new URL('/content/api/v4/resources/recitations', this.apiBaseUrl).toString(), {
+  async fetchRecitationResources(accessToken: string | null): Promise<Array<{ id: number; name: string }>> {
+    const response = await this.fetchImpl(this.getContentUrl('resources/recitations').toString(), {
       method: 'GET',
       headers: this.getApiHeaders(accessToken),
     });
@@ -668,11 +674,20 @@ export class QuranFoundationClient {
     }, expectedNonce);
   }
 
-  private getApiHeaders(accessToken: string): Record<string, string> {
-    return {
+  private getContentUrl(path: string): URL {
+    return new URL(path.replace(/^\/+/, ''), `${this.contentApiBaseUrl.replace(/\/+$/, '')}/`);
+  }
+
+  private getApiHeaders(accessToken: string | null): Record<string, string> {
+    if (!accessToken) return {};
+
+    const headers: Record<string, string> = {
       'x-auth-token': accessToken,
-      'x-client-id': this.clientId,
     };
+    if (this.clientId) {
+      headers['x-client-id'] = this.clientId;
+    }
+    return headers;
   }
 }
 

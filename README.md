@@ -30,9 +30,9 @@ OpenAI-compatible providers append `/chat/completions`; Claude appends `/message
 
 Ayati - Quran Desktop Companion uses the required Quran Foundation API categories:
 
-- **Content API:** `GET {QURAN_API_BASE_URL}/content/api/v4/verses/by_key/{verseKey}` with `translations`, `fields=text_uthmani`, and `translation_fields=resource_name` to fetch Arabic text and translation.
-- **Content API:** `GET {QURAN_API_BASE_URL}/content/api/v4/tafsirs/{resourceId}/by_ayah/{verseKey}` for tafsir snippets.
-- **Content API:** `GET {QURAN_API_BASE_URL}/content/api/v4/recitations/{recitationId}/by_ayah/{verseKey}` for ayah recitation audio.
+- **Content API:** `GET {QURAN_CONTENT_API_BASE_URL}/verses/by_key/{verseKey}` with `translations`, `fields=text_uthmani`, and `translation_fields=resource_name` to fetch Arabic text and translation.
+- **Content API:** `GET {QURAN_CONTENT_API_BASE_URL}/tafsirs/{resourceId}/by_ayah/{verseKey}` for tafsir snippets.
+- **Content API:** `GET {QURAN_CONTENT_API_BASE_URL}/recitations/{recitationId}/by_ayah/{verseKey}` for ayah recitation audio.
 - **User API:** `POST {QURAN_API_BASE_URL}/auth/v1/bookmarks` to save an ayah bookmark with `key`, `verseNumber`, `type: "ayah"`, and `mushaf`.
 - **User API:** `POST {QURAN_API_BASE_URL}/auth/v1/notes` to save personal reflection notes attached to the selected ayah.
 - **User API:** `POST {QURAN_API_BASE_URL}/auth/v1/collections` and `POST /auth/v1/collections/{collectionId}/bookmarks` to create collections and place saved ayahs into them.
@@ -46,6 +46,7 @@ QURAN_CLIENT_ID=your-quran-foundation-client-id
 QURAN_CLIENT_SECRET=your-quran-foundation-client-secret
 QURAN_REDIRECT_URI=ayati://oauth/callback
 QURAN_FOUNDATION_ENV=prelive
+QURAN_CONTENT_API_BASE_URL=https://api.quran.com/api/v4
 ```
 
 For production, move token exchange to a backend proxy. Desktop apps cannot truly hide client secrets.

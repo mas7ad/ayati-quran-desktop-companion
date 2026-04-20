@@ -87,16 +87,7 @@ describe('Pet', () => {
     expect(screen.getByTestId('character-head-layer')).toBeInTheDocument();
   });
 
-  it('renders wings behind the body so they can flap from the body', () => {
-    render(<Pet />);
 
-    const body = screen.getByTestId('character-body-layer');
-    const leftWing = screen.getByTestId('character-left-wing-layer');
-    const rightWing = screen.getByTestId('character-right-wing-layer');
-
-    expect(Boolean(leftWing.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(Boolean(rightWing.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-  });
 
   it('renders the face features over the character head', () => {
     render(<Pet />);
@@ -224,20 +215,5 @@ describe('Pet', () => {
     expect(rightSleepHandRule).not.toMatch(/translate\([^)]*,\s*[1-9][\d.]*px\)/);
   });
 
-  it('leans the tucked wings with the dozing sleep pose', () => {
-    const styles = readFileSync(path.join(process.cwd(), 'src/renderer/pet/styles.css'), 'utf8');
-    const leftDozeWingRule = getCssRuleBody(
-      styles,
-      '.lobster-container.state-doze .character-left-wing',
-    );
-    const rightDozeWingRule = getCssRuleBody(
-      styles,
-      '.lobster-container.state-doze .character-right-wing',
-    );
 
-    expect(leftDozeWingRule).toContain('dozeLeftWingLean');
-    expect(rightDozeWingRule).toContain('dozeRightWingLean');
-    expect(styles).toContain('@keyframes dozeLeftWingLean');
-    expect(styles).toContain('@keyframes dozeRightWingLean');
-  });
 });

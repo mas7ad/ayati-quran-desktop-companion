@@ -200,6 +200,33 @@ describe('QuranFoundationClient', () => {
     });
   });
 
+  it('uses the public Quran.com content API for tafsir without requiring an access token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        tafsir: {
+          resource_id: 169,
+          resource_name: 'Ibn Kathir (Abridged)',
+          language_name: 'english',
+          translated_name: { name: 'Ibn Kathir (Abridged)', language_name: 'english' },
+          text: '<p>Allah does not burden any soul beyond capacity.</p>',
+        },
+      }), { status: 200 }),
+    );
+
+    const client = new QuranFoundationClient({
+      clientId: 'client-id',
+      redirectUri: 'ayati://oauth/callback',
+      contentApiBaseUrl: 'https://api.quran.com/api/v4',
+      fetchImpl: fetchMock,
+    });
+
+    await client.fetchTafsir(null, '2:286', 169);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://api.quran.com/api/v4/tafsirs/169/by_ayah/2%3A286?fields=resource_name%2Clanguage_name');
+    expect(init?.headers).not.toHaveProperty('Authorization');
+  });
+
   it('normalizes relative ayah audio URLs from the Content API', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -225,6 +252,33 @@ describe('QuranFoundationClient', () => {
       url: 'https://verses.quran.foundation/AbdulBaset/Mujawwad/mp3/002286.mp3',
       duration: 12000,
     });
+  });
+
+  it('uses the public Quran.com content API for recitation audio without requiring an access token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        audio_files: [
+          {
+            verse_key: '2:286',
+            url: 'Alafasy/mp3/002286.mp3',
+            duration: 53,
+          },
+        ],
+      }), { status: 200 }),
+    );
+
+    const client = new QuranFoundationClient({
+      clientId: 'client-id',
+      redirectUri: 'ayati://oauth/callback',
+      contentApiBaseUrl: 'https://api.quran.com/api/v4',
+      fetchImpl: fetchMock,
+    });
+
+    await client.fetchAyahAudio(null, '2:286', 7, 'Mishari Rashid al-`Afasy');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://api.quran.com/api/v4/recitations/7/by_ayah/2%3A286?fields=url%2Cduration%2Cverse_key&per_page=1');
+    expect(init?.headers).not.toHaveProperty('Authorization');
   });
 
   it('creates collections and adds ayah bookmarks to them through the User API', async () => {

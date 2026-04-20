@@ -3,6 +3,9 @@ import { OnboardingIcon } from '../OnboardingIcon';
 import { formatAcceleratorForDisplay } from '../../components/HotkeyInput';
 import appIconUrl from '../../../../assets/icon.png';
 
+import { CharacterSvg } from '../../pet/Pet';
+// Styles are imported in WelcomeStep and likely persistent in the onboarding flow bundle
+
 interface Props {
   data: OnboardingData;
   updateData: (updates: Partial<OnboardingData>) => void;
@@ -19,13 +22,9 @@ export const CompleteStep: React.FC<Props> = ({ data, updateData }) => {
     <div className="min-h-full px-12 flex flex-col items-center justify-center text-center py-10">
       <div className="mb-10 relative">
         <div className="relative p-1.5 rounded-[46px] bg-white border border-[#67E0A3]/15">
-          <img
-            src={appIconUrl}
-            alt="Ayati Mascot"
-            width={150}
-            height={150}
-            className="h-[150px] w-[150px] rounded-[42px] object-cover"
-          />
+          <div className="h-[150px] w-[150px] rounded-[42px] overflow-hidden bg-[#FAF9F6] flex items-center justify-center lobster-container state-happy scale-110">
+            <CharacterSvg pupilOffset={null} />
+          </div>
         </div>
       </div>
 
