@@ -69,6 +69,7 @@ import { DEFAULT_HOTKEYS, sanitizeAccelerator } from './hotkeys';
 import { getAiProviderConfig } from './ai-providers';
 import { getWindowPositionNearAnchor } from './window-positioning';
 import { enforceSingleInstanceApp } from './single-instance';
+import { selectPreferredWindow } from './window-selection';
 import { shouldHideWindowOnBlur, shouldRevealWindowInactive } from './window-visibility-policy';
 import {
   createConfiguredUpdateState,
@@ -113,6 +114,8 @@ let onboardingWindow: BrowserWindow | null = null;
 let petContextMenuWindow: BrowserWindow | null = null;
 let workspaceBrowserWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let isChatbarWindowReady = false;
+let shouldRevealChatbarWhenReady = false;
 let pendingPetChatReveal = false;
 let petChatRevealTimeout: NodeJS.Timeout | null = null;
 let petChatAutoHideTimeout: NodeJS.Timeout | null = null;
@@ -273,16 +276,14 @@ function applyDebugWindowBordersToAllWindows(): void {
 }
 
 function getSingleInstanceFocusWindow(): BrowserWindow | null {
-  const candidates = [
+  return selectPreferredWindow([
     assistantWindow,
     chatbarWindow,
     screenshotQuestionWindow,
     workspaceBrowserWindow,
     onboardingWindow,
     petWindow,
-  ];
-
-  return candidates.find((window): window is BrowserWindow => Boolean(window && !window.isDestroyed())) ?? null;
+  ]);
 }
 
 function getAyahLensState(): AyahLensState {
@@ -2870,12 +2871,21 @@ function toggleAssistantWindow() {
   }
 }
 
-function createChatbarWindow() {
+function createChatbarWindow(options?: { preloadOnly?: boolean }) {
+  const preloadOnly = options?.preloadOnly === true;
+
   if (chatbarWindow) {
-    chatbarWindow.show();
-    chatbarWindow.focus();
+    if (isChatbarWindowReady) {
+      chatbarWindow.show();
+      chatbarWindow.focus();
+    } else {
+      shouldRevealChatbarWhenReady = true;
+    }
     return;
   }
+
+  isChatbarWindowReady = false;
+  shouldRevealChatbarWhenReady = !preloadOnly;
 
   const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
   const chatbarWidth = 650;
@@ -2915,7 +2925,13 @@ function createChatbarWindow() {
   }
 
   chatbarWindow.once('ready-to-show', () => {
-    chatbarWindow?.show();
+    isChatbarWindowReady = true;
+
+    if (shouldRevealChatbarWhenReady) {
+      shouldRevealChatbarWhenReady = false;
+      chatbarWindow?.show();
+      chatbarWindow?.focus();
+    }
   });
 
   // Hide on blur (click outside)
@@ -2927,7 +2943,17 @@ function createChatbarWindow() {
 
   chatbarWindow.on('closed', () => {
     chatbarWindow = null;
+    isChatbarWindowReady = false;
+    shouldRevealChatbarWhenReady = false;
   });
+}
+
+/** Load chatbar in the background after startup so the first shortcut only shows an existing window. */
+function warmChatbarWindow() {
+  if (chatbarWindow) {
+    return;
+  }
+  createChatbarWindow({ preloadOnly: true });
 }
 
 function toggleChatbarWindow() {
@@ -3118,6 +3144,10 @@ function startMainApp() {
   registerHotkeys();
 
   createPetWindow();
+
+  setImmediate(() => {
+    warmChatbarWindow();
+  });
 
   // Set up tutorial manager with pet window
   if (petWindow) {
