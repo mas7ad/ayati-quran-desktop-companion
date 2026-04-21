@@ -2545,6 +2545,74 @@ function revealAssistantWindow() {
   }
 }
 
+/**
+ * Ensures a single assistant BrowserWindow: recover a stray instance (lost reference) and destroy duplicates.
+ *
+ * Important: while assistant.html is still loading, the title may be the package name and the URL may be empty,
+ * so the window must still be recognized via the tracked `assistantWindow` reference. Otherwise we can pick
+ * `candidates[0]` incorrectly, orphan the real window, and end up with two identical assistant panels.
+ */
+function reconcileAssistantWindowReference(): void {
+  try {
+    const isAssistantLikeByContent = (w: BrowserWindow): boolean => {
+      try {
+        const title = w.getTitle();
+        const url = w.webContents.getURL();
+        return title.includes('Assistant') || url.includes('assistant.html');
+      } catch {
+        return false;
+      }
+    };
+
+    const candidates: BrowserWindow[] = [];
+    const seen = new Set<number>();
+
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (w.isDestroyed()) continue;
+
+      const isTracked =
+        Boolean(assistantWindow && !assistantWindow.isDestroyed() && w.id === assistantWindow.id);
+      if (isTracked || isAssistantLikeByContent(w)) {
+        if (!seen.has(w.id)) {
+          seen.add(w.id);
+          candidates.push(w);
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
+      return;
+    }
+
+    if (candidates.length === 1) {
+      assistantWindow = candidates[0];
+      return;
+    }
+
+    const trackedIsLive =
+      Boolean(assistantWindow && !assistantWindow.isDestroyed()) &&
+      candidates.some((w) => w.id === assistantWindow!.id);
+
+    if (trackedIsLive && assistantWindow) {
+      const keep = assistantWindow;
+      for (const w of candidates) {
+        if (w.id !== keep.id) {
+          w.destroy();
+        }
+      }
+      return;
+    }
+
+    // Multiple assistant-like windows but no trusted reference (or reference did not match): start clean.
+    for (const w of candidates) {
+      w.destroy();
+    }
+    assistantWindow = null;
+  } catch {
+    // ignore
+  }
+}
+
 function openAssistantOnTab(tab: 'chat' | 'settings') {
   createAssistantWindow();
   if (!assistantWindow || assistantWindow.isDestroyed()) return;
@@ -2565,6 +2633,11 @@ function openAssistantOnTab(tab: 'chat' | 'settings') {
 }
 
 function createAssistantWindow() {
+  if (assistantWindow?.isDestroyed()) {
+    assistantWindow = null;
+  }
+  reconcileAssistantWindowReference();
+
   if (assistantWindow) {
     revealAssistantWindow();
     updateAssistantPosition();
@@ -2608,6 +2681,7 @@ function createAssistantWindow() {
     },
   });
   wireDebugWindowBorder(assistantWindow);
+  assistantWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   if (process.platform === 'darwin' || process.platform === 'linux') {
     assistantWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
@@ -2620,10 +2694,6 @@ function createAssistantWindow() {
 
   assistantWindow.once('ready-to-show', () => {
     revealAssistantWindow();
-    // Open DevTools in dev mode
-    if (isDev) {
-      assistantWindow?.webContents.openDevTools({ mode: 'detach' });
-    }
   });
 
   assistantWindow.on('closed', () => {
@@ -2771,7 +2841,17 @@ function showPetContextMenuAtCursor(cursorX: number, cursorY: number) {
 }
 
 function toggleAssistantWindow() {
-  if (assistantWindow && assistantWindow.isVisible()) {
+  if (assistantWindow?.isDestroyed()) {
+    assistantWindow = null;
+  }
+  reconcileAssistantWindowReference();
+
+  if (!assistantWindow) {
+    createAssistantWindow();
+    return;
+  }
+
+  if (assistantWindow.isVisible()) {
     assistantWindow.hide();
   } else {
     createAssistantWindow();

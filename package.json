@@ -15,6 +15,7 @@
     "build:renderer": "vite build",
     "dist": "bun run build && electron-builder",
     "dist:mac": "bun run build && electron-builder --mac",
+    "dist:mac:unsigned": "bun run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac -c.mac.identity=null -c.mac.notarize=false -p never",
     "dist:mac:deploy": "bun run dist:mac",
     "dist:win": "bun run build && electron-builder --win",
     "dist:linux": "bun run build && electron-builder --linux",
@@ -62,6 +63,7 @@
     "appId": "com.ayati.quran-desktop-companion",
     "productName": "Ayati - Quran Desktop Companion",
     "icon": "assets/icon.png",
+    "npmRebuild": false,
     "mac": {
       "identity": "Yuwen Wu (39428U49B4)",
       "category": "public.app-category.productivity",

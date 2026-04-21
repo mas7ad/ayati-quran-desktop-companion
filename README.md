@@ -76,6 +76,29 @@ bun run test
 bun run build
 ```
 
+## Packaging macOS
+
+Build downloadable macOS artifacts with Electron Builder:
+
+```bash
+bun run dist:mac
+```
+
+The macOS build writes DMG, ZIP, blockmap, and update metadata files into `release/`:
+
+- `Ayati - Quran Desktop Companion-<version>.dmg` for Intel Macs.
+- `Ayati - Quran Desktop Companion-<version>-arm64.dmg` for Apple Silicon Macs.
+- Matching `*-mac.zip` files for auto-update feeds.
+- `latest-mac.yml` for `electron-updater`.
+
+For a first local or private test build without code signing or notarization, use:
+
+```bash
+bun run dist:mac:unsigned
+```
+
+Unsigned builds are downloadable, but macOS Gatekeeper will warn users. For public distribution, build on a Mac with an Apple Developer account, a valid Developer ID Application certificate in Keychain, and Apple notarization credentials configured for Electron Builder. Then upload the DMG, ZIP, blockmap, and `latest-mac.yml` files from `release/` to a GitHub Release or another static download host matching the `build.publish.url` setting in `package.json`.
+
 Runtime code lives under `src/`:
 
 - `src/main/main.ts` - Electron app bootstrap, windows, IPC, screenshot capture, and Ayati - Quran Desktop Companion orchestration.
