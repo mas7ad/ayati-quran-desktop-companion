@@ -35,7 +35,8 @@ import { TutorialManager } from './tutorial';
 import { getFrontmostWindowTitleFromSystemEvents } from './window-title';
 import { buildContextualQuranNudge, buildTimedQuranReminder } from './ayah-contextual-nudges';
 import { analyzeScreenForAyah } from './ayah-scene-analyzer';
-import { selectAyahCandidateWithAi } from './ayah-ai-selector';
+import { selectAyahCandidateWithAi, shouldUseRankedTopCandidateWithoutAi } from './ayah-ai-selector';
+import { shrinkImageDataUrlForVisionAnalysis } from './ayah-vision-image';
 import { fetchVerseContentForReflection as fetchVerseContentWithFallback } from './ayah-reflection-content';
 import {
   createDefaultAyahLensState,
@@ -116,6 +117,11 @@ let pendingPetChatReveal = false;
 let petChatRevealTimeout: NodeJS.Timeout | null = null;
 let petChatAutoHideTimeout: NodeJS.Timeout | null = null;
 let pendingAyahReflectionResult: { reflection?: AyahReflection; error?: string } | null = null;
+/** When set, screenshot modal opened before prepare finished; IPC waits on this so the renderer does not start a second capture. */
+let ayahReflectionPrepareInFlight: Promise<void> | null = null;
+/** Brief echo so a second `getPending` (e.g. React Strict Mode remount) still receives the same result instead of starting another capture. */
+let ayahPendingReflectionEcho: { reflection?: AyahReflection; error?: string } | null = null;
+let ayahPendingReflectionEchoUntil = 0;
 
 // Services
 let watchers: Watchers | null = null;
@@ -601,16 +607,19 @@ async function captureAyahReflection(): Promise<AyahReflection> {
   let capture: Awaited<ReturnType<typeof captureScreenWithContext>> | null = null;
 
   try {
-    await playPetCameraSnapAnimationBeforeCapture();
     capture = await captureScreenWithContext();
     if (!capture) {
       throw new Error('Screen capture was unavailable. Check Screen Recording permission and try again.');
     }
+    triggerPetCameraSnapFeedback();
 
-    const insight = await analyzeScreenForAyah(clawbot, capture.image);
+    const imageForVision = await shrinkImageDataUrlForVisionAnalysis(capture.image);
+    const insight = await analyzeScreenForAyah(clawbot, imageForVision);
     const state = getAyahLensState();
     const candidates = rankAyahCandidates(insight, state.recentVerseKeys, getFeedbackSignals(state));
-    const candidate = await selectAyahCandidateWithAi(clawbot, insight, candidates);
+    const candidate = shouldUseRankedTopCandidateWithoutAi(candidates)
+      ? candidates[0]
+      : await selectAyahCandidateWithAi(clawbot, insight, candidates);
     const verse = await fetchVerseContentForReflection(candidate.verseKey);
     const candidateIndex = Math.max(0, candidates.findIndex((item) => item.verseKey === candidate.verseKey));
     const reflection = buildAyahReflection(verse, candidate, insight, candidates.map((item) => item.verseKey), candidateIndex);
@@ -625,6 +634,8 @@ async function captureAyahReflection(): Promise<AyahReflection> {
 }
 
 async function preparePendingAyahReflectionResult(): Promise<void> {
+  ayahPendingReflectionEcho = null;
+  ayahPendingReflectionEchoUntil = 0;
   try {
     pendingAyahReflectionResult = { reflection: await captureAyahReflection() };
   } catch (error) {
@@ -1020,7 +1031,6 @@ const WORKSPACE_BROWSER_WIDTH = 420;
 const WORKSPACE_BROWSER_HEIGHT = 520;
 const SCREENSHOT_QUESTION_WIDTH = ASSISTANT_WINDOW_WIDTH;
 const SCREENSHOT_QUESTION_HEIGHT = ASSISTANT_WINDOW_HEIGHT;
-const PET_CAMERA_SNAP_CAPTURE_DELAY_MS = 560;
 const PET_CAMERA_SNAP_DURATION_MS = 920;
 const PET_CAMERA_SNAP_FLASH_DURATION_MS = 120;
 const DEV_FORCE_ACTIVE_APP_COMMENT_DELAY_MS = 5000;
@@ -1844,16 +1854,18 @@ function getScreenCapturePermissionStatus(): string {
   return systemPreferences.getMediaAccessStatus('screen');
 }
 
-async function playPetCameraSnapAnimationBeforeCapture(): Promise<void> {
+/**
+ * Visual feedback after a screenshot is taken. Runs immediately (no delay) so it does not
+ * shift what appears in the capture relative to when the user triggered it.
+ */
+function triggerPetCameraSnapFeedback(): void {
   if (!petWindow || petWindow.isDestroyed() || isSleeping) return;
 
   petWindow.webContents.send('pet-camera-snap', {
-    captureAtMs: PET_CAMERA_SNAP_CAPTURE_DELAY_MS,
+    captureAtMs: 0,
     durationMs: PET_CAMERA_SNAP_DURATION_MS,
     flashDurationMs: PET_CAMERA_SNAP_FLASH_DURATION_MS,
   });
-
-  await new Promise((resolve) => setTimeout(resolve, PET_CAMERA_SNAP_CAPTURE_DELAY_MS));
 }
 
 // Native macOS screen capture using screencapture command (much faster than desktopCapturer)
@@ -3017,9 +3029,12 @@ function toggleScreenshotQuestionWindow() {
   if (screenshotQuestionWindow && screenshotQuestionWindow.isVisible()) {
     screenshotQuestionWindow.hide();
   } else {
-    void preparePendingAyahReflectionResult().finally(() => {
-      createScreenshotQuestionWindow();
+    const preparePromise = preparePendingAyahReflectionResult();
+    ayahReflectionPrepareInFlight = preparePromise;
+    void preparePromise.finally(() => {
+      ayahReflectionPrepareInFlight = null;
     });
+    createScreenshotQuestionWindow();
   }
 }
 
@@ -3593,10 +3608,21 @@ function setupIPC() {
     return await captureAyahReflection();
   });
 
-  ipcMain.handle('ayah-pending-reflection-result', () => {
-    const result = pendingAyahReflectionResult;
-    pendingAyahReflectionResult = null;
-    return result;
+  ipcMain.handle('ayah-pending-reflection-result', async () => {
+    if (ayahReflectionPrepareInFlight) {
+      await ayahReflectionPrepareInFlight;
+    }
+    if (pendingAyahReflectionResult) {
+      const result = pendingAyahReflectionResult;
+      pendingAyahReflectionResult = null;
+      ayahPendingReflectionEcho = result;
+      ayahPendingReflectionEchoUntil = Date.now() + 12_000;
+      return result;
+    }
+    if (ayahPendingReflectionEcho && Date.now() < ayahPendingReflectionEchoUntil) {
+      return ayahPendingReflectionEcho;
+    }
+    return null;
   });
 
   ipcMain.handle('ayah-save-reflection', async (_event, reflectionId: string) => {
@@ -3740,8 +3766,11 @@ function setupIPC() {
 
   // Screen capture
   ipcMain.handle('capture-screen', async () => {
-    await playPetCameraSnapAnimationBeforeCapture();
-    return await captureScreen();
+    const image = await captureScreen();
+    if (image) {
+      triggerPetCameraSnapFeedback();
+    }
+    return image;
   });
 
   // Build chat payload with history and optional screen context
@@ -3859,8 +3888,11 @@ function setupIPC() {
 
   // Capture screen with context
   ipcMain.handle('capture-screen-with-context', async () => {
-    await playPetCameraSnapAnimationBeforeCapture();
-    return await captureScreenWithContext();
+    const result = await captureScreenWithContext();
+    if (result) {
+      triggerPetCameraSnapFeedback();
+    }
+    return result;
   });
 
   // Execute pet action directly

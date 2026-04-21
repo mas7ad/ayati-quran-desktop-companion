@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ScreenshotQuestion } from './ScreenshotQuestion';
@@ -19,10 +20,16 @@ const reflection: AyahReflection = {
   syncState: 'local',
 };
 
-function installMockAyati(error: Error, pendingResult: PendingAyahReflectionResult | null = null): Partial<Window['ayati']> {
+function installMockAyati(
+  error: Error,
+  pendingResult: PendingAyahReflectionResult | null | Promise<PendingAyahReflectionResult | null> = null,
+): Partial<Window['ayati']> {
+  const pendingResultPromise = typeof (pendingResult as Promise<PendingAyahReflectionResult | null> | null)?.then === 'function'
+    ? pendingResult as Promise<PendingAyahReflectionResult | null>
+    : Promise.resolve(pendingResult as PendingAyahReflectionResult | null);
   const ayati = {
     ...createMockAyati(error),
-    getPendingAyahReflectionResult: vi.fn().mockResolvedValue(pendingResult),
+    getPendingAyahReflectionResult: vi.fn().mockImplementation(() => pendingResultPromise),
   } satisfies Partial<Window['ayati']>;
 
   Object.defineProperty(window, 'ayati', {
@@ -85,5 +92,28 @@ describe('ScreenshotQuestion', () => {
     expect(await screen.findByRole('heading', { name: /reflection unavailable/i })).toBeInTheDocument();
     expect(screen.getByText('AI provider is not connected.')).toBeInTheDocument();
     expect(ayati.captureAyahReflection).not.toHaveBeenCalled();
+  });
+
+  it('disables re-capture controls while waiting for the pending reflection result', async () => {
+    let resolvePending: ((value: PendingAyahReflectionResult | null) => void) | null = null;
+    const pendingPromise = new Promise<PendingAyahReflectionResult | null>((resolve) => {
+      resolvePending = resolve;
+    });
+    const ayati = installMockAyati(new Error('Should not capture again.'), pendingPromise);
+    const user = userEvent.setup();
+
+    render(<ScreenshotQuestion />);
+
+    const reflectAgainButton = screen.getByRole('button', { name: /reflect again/i });
+    expect(reflectAgainButton).toBeDisabled();
+
+    await user.click(reflectAgainButton);
+    expect(ayati.captureAyahReflection).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolvePending?.({ reflection });
+      await pendingPromise;
+    });
+    expect(await screen.findByText('Al-Baqarah 2:286')).toBeInTheDocument();
   });
 });

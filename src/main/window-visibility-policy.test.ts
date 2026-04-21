@@ -38,11 +38,19 @@ describe('shouldHideWindowOnBlur', () => {
     expect(mainSource).not.toContain('screenshotQuestionWindow.focus()');
   });
 
-  it('prepares the reflection before opening the screenshot modal', () => {
+  it('starts reflection prepare then opens the screenshot modal immediately', () => {
     const mainSource = readFileSync(path.join(process.cwd(), 'src/main/main.ts'), 'utf8');
 
-    expect(mainSource).toContain('preparePendingAyahReflectionResult().finally');
+    expect(mainSource).toContain('createScreenshotQuestionWindow()');
+    expect(mainSource).toContain('ayahReflectionPrepareInFlight');
     expect(mainSource).toContain("ipcMain.handle('ayah-pending-reflection-result'");
     expect(mainSource).not.toContain("webContents.send('retake-screenshot')");
+  });
+
+  it('only plays snap feedback when capture actually succeeds', () => {
+    const mainSource = readFileSync(path.join(process.cwd(), 'src/main/main.ts'), 'utf8');
+
+    expect(mainSource).toMatch(/const image = await captureScreen\(\);\s+if \(image\) \{\s+triggerPetCameraSnapFeedback\(\);/);
+    expect(mainSource).toMatch(/const result = await captureScreenWithContext\(\);\s+if \(result\) \{\s+triggerPetCameraSnapFeedback\(\);/);
   });
 });

@@ -24,6 +24,7 @@ export function ScreenshotQuestion(): JSX.Element {
   const [collections, setCollections] = useState<AyahCollection[]>([]);
   const [message, setMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const isCaptureBusy = captureState === 'checking' || captureState === 'capturing' || captureState === 'analyzing';
 
   const captureReflection = useCallback(async () => {
     setReflection(null);
@@ -228,7 +229,7 @@ export function ScreenshotQuestion(): JSX.Element {
         {message && captureState !== 'error' && <p className="ayah-message">{message}</p>}
 
         <footer className="ayah-capture-footer">
-          <button type="button" className="ayah-secondary-button" onClick={captureReflection} disabled={captureState === 'analyzing'}>
+          <button type="button" className="ayah-secondary-button" onClick={captureReflection} disabled={isCaptureBusy}>
             Reflect Again
           </button>
           <span><kbd>Esc</kbd> closes</span>

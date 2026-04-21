@@ -1,5 +1,15 @@
 import type { RankedAyahCandidate, ScreenInsight } from './ayah-types';
 
+/** When the ranked list has a clear winner, skip the second LLM round-trip (~seconds). */
+const CLEAR_WINNER_SCORE_GAP = 32;
+
+export function shouldUseRankedTopCandidateWithoutAi(candidates: RankedAyahCandidate[]): boolean {
+  if (candidates.length <= 1) return true;
+  const [top, second] = candidates;
+  if (top.isFallback || second.isFallback) return true;
+  return top.score - second.score >= CLEAR_WINNER_SCORE_GAP;
+}
+
 interface AiVerseSelectionClient {
   isConnected: () => boolean;
   chat: (message: string) => Promise<{ text?: string }>;

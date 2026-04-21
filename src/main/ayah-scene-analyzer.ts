@@ -42,7 +42,15 @@ function clampConfidence(value: unknown): number {
 }
 
 function extractJson(text: string): unknown {
-  const trimmed = text.trim();
+  let trimmed = text.trim();
+  const fence = trimmed.match(/^```(?:json)?\s*([\s\S]*?)```/im);
+  if (fence) {
+    trimmed = fence[1].trim();
+  }
+  const firstBrace = trimmed.indexOf('{');
+  if (firstBrace > 0) {
+    trimmed = trimmed.slice(firstBrace);
+  }
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
     return JSON.parse(trimmed);
   }
@@ -136,13 +144,18 @@ function parseScreenInsight(value: unknown): ScreenInsight | null {
   };
 }
 
-function buildScreenAnalysisError(message: string): Error {
-  const trimmed = message.trim();
-  if (!trimmed) {
+function buildScreenAnalysisError(rawResponse: string): Error {
+  const preview = rawResponse.trim().slice(0, 2000);
+  if (preview.startsWith('AI provider error') || preview.startsWith('Failed to reach AI provider')) {
+    return new Error(preview);
+  }
+  if (preview) {
+    console.warn('[ayah-scene-analyzer] Unparseable screen analysis response:', preview);
+  }
+  if (!preview) {
     return new Error('AI provider returned an empty screen-analysis response.');
   }
-
-  return new Error(`AI provider could not analyze the screen: ${trimmed.slice(0, 500)}`);
+  return new Error('The AI could not produce a valid screen analysis. Please try again.');
 }
 
 export async function analyzeScreenForAyah(

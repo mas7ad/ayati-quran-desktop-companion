@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { selectAyahCandidateWithAi } from './ayah-ai-selector';
+import { selectAyahCandidateWithAi, shouldUseRankedTopCandidateWithoutAi } from './ayah-ai-selector';
 import type { RankedAyahCandidate, ScreenInsight } from './ayah-types';
 
 const insight: ScreenInsight = {
@@ -92,5 +92,27 @@ describe('selectAyahCandidateWithAi', () => {
 
     await expect(selectAyahCandidateWithAi(client, sensitiveInsight, candidates)).resolves.toBe(candidates[0]);
     expect(client.chat).not.toHaveBeenCalled();
+  });
+});
+
+describe('shouldUseRankedTopCandidateWithoutAi', () => {
+  it('returns true when there is only one candidate', () => {
+    expect(shouldUseRankedTopCandidateWithoutAi([candidates[0]])).toBe(true);
+  });
+
+  it('returns true when the top score beats the second by a wide margin', () => {
+    const wide: RankedAyahCandidate[] = [
+      { ...candidates[0], score: 200 },
+      { ...candidates[1], score: 150 },
+    ];
+    expect(shouldUseRankedTopCandidateWithoutAi(wide)).toBe(true);
+  });
+
+  it('returns false when top two are close so the AI should break the tie', () => {
+    const close: RankedAyahCandidate[] = [
+      { ...candidates[0], score: 180 },
+      { ...candidates[1], score: 175 },
+    ];
+    expect(shouldUseRankedTopCandidateWithoutAi(close)).toBe(false);
   });
 });
