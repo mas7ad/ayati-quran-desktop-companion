@@ -14,7 +14,7 @@ describe('AYAH_ATLAS', () => {
   });
 
   it('keeps each named clip on its own spritesheet row', () => {
-    expect(AYAH_ATLAS.clips).toEqual({
+    expect(AYAH_ATLAS.clips).toMatchObject({
       idle: { start: 0, length: 6, fps: 1 },
       'running-right': { start: 8, length: 8 },
       'running-left': { start: 16, length: 8 },

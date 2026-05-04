@@ -71,6 +71,7 @@ function createMockAyati() {
     forceTimedReminderComment: vi.fn().mockResolvedValue(true),
     forcePrayerReminderComment: vi.fn().mockResolvedValue(true),
     forceTodoReminderComment: vi.fn().mockResolvedValue(true),
+    executePetAction: vi.fn().mockResolvedValue({ ok: true }),
     getPrayerSettings: vi.fn().mockResolvedValue({
       enabled: false,
       city: '',
@@ -441,6 +442,33 @@ describe('Assistant settings shortcuts', () => {
 });
 
 describe('Assistant developer settings', () => {
+  it('lists every available selected companion state in developer settings', async () => {
+    const ayati = createMockAyati();
+    ayati.getSettings = vi.fn().mockResolvedValue({
+      pet: { appearanceId: 'ayah', transparentWhenSleeping: false },
+      dev: { showPetModeOverlay: false },
+    });
+    Object.defineProperty(window, 'ayati', {
+      configurable: true,
+      value: ayati as Window['ayati'],
+    });
+
+    await act(async () => {
+      render(<Assistant />);
+    });
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    expect(await screen.findByRole('button', { name: 'running-right' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'review' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'curious' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'surprised' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'review' }));
+
+    expect(ayati.executePetAction).toHaveBeenCalledWith({ type: 'set_mood', value: 'review' });
+  });
+
   it('can trigger a test reminder comment from developer settings', async () => {
     const ayati = createMockAyati();
     Object.defineProperty(window, 'ayati', {

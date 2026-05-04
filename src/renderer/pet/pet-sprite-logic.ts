@@ -47,22 +47,27 @@ export function normalizeIncomingPetState(state: string): PetVisualState {
 export function legacyMoodToClip(mood: LegacyMood): PetClipId {
   switch (mood) {
     case 'happy':
-    case 'proud':
-      return 'waving';
-    case 'excited':
-    case 'spin':
-    case 'startle':
-      return 'jumping';
+      return 'happy';
     case 'curious':
-      return 'waiting';
-    case 'thinking':
-    case 'surprised':
-      return 'review';
-    case 'mad':
-      return 'failed';
+      return 'curious';
     case 'sleeping':
+      return 'sleeping';
+    case 'thinking':
+      return 'thinking';
+    case 'excited':
+      return 'excited';
     case 'doze':
-      return 'idle';
+      return 'doze';
+    case 'startle':
+      return 'startle';
+    case 'proud':
+      return 'proud';
+    case 'mad':
+      return 'mad';
+    case 'spin':
+      return 'spin';
+    case 'surprised':
+      return 'surprised';
     default:
       return 'idle';
   }
@@ -95,7 +100,7 @@ export function resolveSpriteClip(input: {
     if (walkDirection === 'right') return 'running-right';
     return 'running';
   }
-  if (isSleepVisualState(visualState)) return 'idle';
   if (isPetClipId(visualState)) return visualState;
+  if (isSleepVisualState(visualState)) return 'idle';
   return legacyMoodToClip(visualState);
 }

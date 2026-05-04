@@ -13,11 +13,13 @@ import {
 import {
   PET_APPEARANCE_IDS,
   PET_APPEARANCE_LABELS,
+  normalizePetAppearanceId,
   type PetAppearanceId,
 } from '../../shared/pet-appearance';
 import { getClientPomodoroRemainingMs } from '../../shared/pomodoro-client';
 import { getNextPrayer } from '../../shared/prayer-schedule';
 import { filterAvailableRecitationResources } from '../../shared/quran-reciter-preferences';
+import { getAtlasForAppearance, type PetClipId } from '../pet/pet-sprite-atlas';
 
 interface Message {
   id: string;
@@ -233,6 +235,13 @@ export const Assistant: React.FC = () => {
   const [selectedFocusTodoId, setSelectedFocusTodoId] = useState('');
   const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null);
   const [updateStatusMessage, setUpdateStatusMessage] = useState('');
+  const selectedPetAppearanceId = normalizePetAppearanceId(
+    (settings.pet as { appearanceId?: unknown } | undefined)?.appearanceId,
+  );
+  const forcedCompanionStates = useMemo(
+    () => Object.keys(getAtlasForAppearance(selectedPetAppearanceId).clips) as PetClipId[],
+    [selectedPetAppearanceId],
+  );
   const [oauthCallbackUrl, setOauthCallbackUrl] = useState('');
   const [quranStatusMessage, setQuranStatusMessage] = useState('');
   const [qulFontPacks, setQulFontPacks] = useState<Record<string, boolean> | null>(null);
@@ -2297,20 +2306,7 @@ export const Assistant: React.FC = () => {
                     </p>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
-                    {[
-                      'idle',
-                      'happy',
-                      'curious',
-                      'thinking',
-                      'excited',
-                      'doze',
-                      'sleeping',
-                      'startle',
-                      'proud',
-                      'mad',
-                      'spin',
-                      'surprised',
-                    ].map((mood) => (
+                    {forcedCompanionStates.map((mood) => (
                       <button
                         key={mood}
                         onClick={() => {

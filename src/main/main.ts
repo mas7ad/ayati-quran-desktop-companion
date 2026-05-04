@@ -1215,25 +1215,28 @@ const POMODORO_TIMER_VERTICAL_GAP = 8;
 const ASSISTANT_CLEAR_ABOVE_TIMER_PX = 4;
 
 /**
- * macOS `setAlwaysOnTop` levels: pet lowest, Pomodoro timer above pet, assistant/chat/screenshot/chatbar at `pop-up-menu`.
- * Workspace + pet context use `screen-saver` so the workspace stays above those HTML windows (relative ordering within
- * `pop-up-menu` was not reliable after assistant `setPosition` / clamp). Pet context uses a higher relative than workspace.
- * Pet-anchored panels use a larger vertical gap when the Pomodoro timer strip is visible (no vertical overlap).
- * Non-macOS: `elevateWorkspaceBrowserAboveCompanionWindows()` uses `moveTop` after other companion windows show.
+ * macOS `setAlwaysOnTop` levels: assistant/chat/screenshot/chatbar at `pop-up-menu`. Workspace uses `screen-saver` (0)
+ * so it stays above `pop-up-menu` windows. Pet (20), Pomodoro (25, 2nd-highest), and pet context (30) use higher
+ * `screen-saver` relatives. Pet-anchored panels use a larger vertical gap when the Pomodoro timer strip is visible
+ * (no vertical overlap). Non-macOS: `moveTop` chains pet → pomodoro → context after workspace/pet restacks so ordering
+ * matches macOS relatives among equal `alwaysOnTop` peers.
  */
-const MAC_AOT_PET_LEVEL = 'floating' as const;
-const MAC_AOT_POMODORO_TIMER_LEVEL = 'modal-panel' as const;
 const MAC_AOT_COMPANION_POPUP_LEVEL = 'pop-up-menu' as const;
 /** Same Electron `pop-up-menu` tier: assistant, pet chat, screenshot, chatbar (macOS relative ordering). */
 const MAC_AOT_COMPANION_PANEL_RELATIVE_LEVEL = 0;
-/** macOS NSWindow level above `pop-up-menu` — workspace + pet menu only (see `setWorkspaceBrowserWindowAlwaysOnTop`). */
+/** macOS NSWindow level above `pop-up-menu` — workspace + pet anchor windows (see setters below). */
 const MAC_AOT_SCREEN_SAVER_LEVEL = 'screen-saver' as const;
 const MAC_AOT_WORKSPACE_SS_RELATIVE = 0;
-const MAC_AOT_PET_CONTEXT_MENU_SS_RELATIVE = 10;
+/** Pet sprite: above `pop-up-menu` windows and the workspace browser. */
+const MAC_AOT_PET_SS_RELATIVE = 20;
+/** Pomodoro timer: above pet, below the pet context menu (2nd-highest companion tier). */
+const MAC_AOT_POMODORO_SS_RELATIVE = 25;
+/** Pet context menu: highest — above Pomodoro and pet so it stays readable and clickable. */
+const MAC_AOT_PET_CONTEXT_MENU_SS_RELATIVE = 30;
 
 function setCompanionWindowAlwaysOnTop(
   window: BrowserWindow,
-  level: typeof MAC_AOT_PET_LEVEL | typeof MAC_AOT_POMODORO_TIMER_LEVEL | typeof MAC_AOT_COMPANION_POPUP_LEVEL,
+  level: typeof MAC_AOT_COMPANION_POPUP_LEVEL,
   relativeLevel?: number,
 ): void {
   if (process.platform !== 'darwin') {
@@ -1256,7 +1259,25 @@ function setWorkspaceBrowserWindowAlwaysOnTop(window: BrowserWindow): void {
   window.setAlwaysOnTop(true, MAC_AOT_SCREEN_SAVER_LEVEL, MAC_AOT_WORKSPACE_SS_RELATIVE);
 }
 
-/** Pet context menu: same tier as workspace but higher relative so it stays clickable over the workspace. */
+/** Pet sprite window: above workspace so the character stays on top of other companions. */
+function setPetWindowAlwaysOnTop(window: BrowserWindow): void {
+  if (process.platform !== 'darwin') {
+    window.setAlwaysOnTop(true);
+    return;
+  }
+  window.setAlwaysOnTop(true, MAC_AOT_SCREEN_SAVER_LEVEL, MAC_AOT_PET_SS_RELATIVE);
+}
+
+/** Pomodoro timer: above pet sprite, below pet context menu. */
+function setPomodoroTimerWindowAlwaysOnTop(window: BrowserWindow): void {
+  if (process.platform !== 'darwin') {
+    window.setAlwaysOnTop(true);
+    return;
+  }
+  window.setAlwaysOnTop(true, MAC_AOT_SCREEN_SAVER_LEVEL, MAC_AOT_POMODORO_SS_RELATIVE);
+}
+
+/** Pet context menu: same `screen-saver` tier; highest relative — above Pomodoro, pet, and workspace. */
 function setPetContextMenuWindowAlwaysOnTop(window: BrowserWindow): void {
   if (process.platform !== 'darwin') {
     window.setAlwaysOnTop(true);
@@ -1300,31 +1321,54 @@ function shouldRevealAssistantInactive(): boolean {
   return policy.shouldRevealInactive || shouldRevealWindowInactive('assistant');
 }
 
-/**
- * After another companion `BrowserWindow` is shown or moved, keep the workspace browser above it.
- * macOS: re-apply `setAlwaysOnTop` + `moveTop` (assistant `setPosition`/`show` can reorder above workspace otherwise).
- * Windows/Linux: `setAlwaysOnTop(true)` + `moveTop` (relative levels are not ordered reliably).
- */
-function elevateWorkspaceBrowserAboveCompanionWindows(): void {
-  if (!workspaceBrowserWindow || workspaceBrowserWindow.isDestroyed()) {
-    return;
-  }
-  applyAssistantWindowStacking();
+function elevatePetAboveCompanionWindows(): void {
+  if (!petWindow || petWindow.isDestroyed()) return;
   try {
     if (process.platform === 'darwin') {
-      setWorkspaceBrowserWindowAlwaysOnTop(workspaceBrowserWindow);
+      setPetWindowAlwaysOnTop(petWindow);
     } else {
-      workspaceBrowserWindow.setAlwaysOnTop(true);
+      petWindow.setAlwaysOnTop(true);
     }
-    workspaceBrowserWindow.moveTop();
+    petWindow.moveTop();
   } catch {
     // ignore
   }
 
-  if (workspaceRestackTimeout) return;
-  workspaceRestackTimeout = setTimeout(() => {
-    workspaceRestackTimeout = null;
-    if (!workspaceBrowserWindow || workspaceBrowserWindow.isDestroyed()) return;
+  if (petPomodoroTimerWindow && !petPomodoroTimerWindow.isDestroyed()) {
+    try {
+      if (process.platform === 'darwin') {
+        setPomodoroTimerWindowAlwaysOnTop(petPomodoroTimerWindow);
+      } else {
+        petPomodoroTimerWindow.setAlwaysOnTop(true);
+      }
+      petPomodoroTimerWindow.moveTop();
+    } catch {
+      // ignore
+    }
+  }
+
+  if (petContextMenuWindow && !petContextMenuWindow.isDestroyed()) {
+    try {
+      if (process.platform === 'darwin') {
+        setPetContextMenuWindowAlwaysOnTop(petContextMenuWindow);
+      } else {
+        petContextMenuWindow.setAlwaysOnTop(true);
+      }
+      petContextMenuWindow.moveTop();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * After another companion `BrowserWindow` is shown or moved, keep the workspace browser above `pop-up-menu` peers; then
+ * restack pet-anchor windows: pet → Pomodoro → pet context menu (Win/Linux: `moveTop` order; macOS: `screen-saver`
+ * relatives 20 / 25 / 30).
+ */
+function elevateWorkspaceBrowserAboveCompanionWindows(): void {
+  if (workspaceBrowserWindow && !workspaceBrowserWindow.isDestroyed()) {
+    applyAssistantWindowStacking();
     try {
       if (process.platform === 'darwin') {
         setWorkspaceBrowserWindowAlwaysOnTop(workspaceBrowserWindow);
@@ -1335,7 +1379,31 @@ function elevateWorkspaceBrowserAboveCompanionWindows(): void {
     } catch {
       // ignore
     }
-  }, 0);
+
+    elevatePetAboveCompanionWindows();
+
+    if (workspaceRestackTimeout) return;
+    workspaceRestackTimeout = setTimeout(() => {
+      workspaceRestackTimeout = null;
+      if (!workspaceBrowserWindow || workspaceBrowserWindow.isDestroyed()) {
+        elevatePetAboveCompanionWindows();
+        return;
+      }
+      try {
+        if (process.platform === 'darwin') {
+          setWorkspaceBrowserWindowAlwaysOnTop(workspaceBrowserWindow);
+        } else {
+          workspaceBrowserWindow.setAlwaysOnTop(true);
+        }
+        workspaceBrowserWindow.moveTop();
+      } catch {
+        // ignore
+      }
+      elevatePetAboveCompanionWindows();
+    }, 0);
+    return;
+  }
+  elevatePetAboveCompanionWindows();
 }
 
 const ASSISTANT_VERTICAL_GAP = -3;
@@ -2712,7 +2780,11 @@ function deliverPomodoroTimerPayload(w: BrowserWindow, payload: PomodoroPetOverl
     if (w.isDestroyed()) return;
     w.webContents.send('pomodoro-overlay-update', payload);
     if (payload) {
+      const wasHidden = !w.isVisible();
       w.showInactive();
+      if (wasHidden) {
+        elevatePetAboveCompanionWindows();
+      }
     } else {
       w.hide();
     }
@@ -2755,7 +2827,7 @@ function ensurePetPomodoroTimerWindow(): BrowserWindow | null {
   });
   wireDebugWindowBorder(petPomodoroTimerWindow);
   petPomodoroTimerWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  setCompanionWindowAlwaysOnTop(petPomodoroTimerWindow, MAC_AOT_POMODORO_TIMER_LEVEL);
+  setPomodoroTimerWindowAlwaysOnTop(petPomodoroTimerWindow);
 
   if (isDev) {
     petPomodoroTimerWindow.loadURL(`http://localhost:${DEV_PORT}/pomodoro-timer.html`);
@@ -2939,7 +3011,7 @@ function createPetWindow() {
 
   // Allow dragging and going above menu bar; stay below Pomodoro timer and other companion popups (macOS levels).
   petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  setCompanionWindowAlwaysOnTop(petWindow, MAC_AOT_PET_LEVEL);
+  setPetWindowAlwaysOnTop(petWindow);
 
   if (isDev) {
     petWindow.loadURL(`http://localhost:${DEV_PORT}/pet.html`);
@@ -3541,6 +3613,7 @@ function showPetContextMenuAtCursor(cursorX: number, cursorY: number) {
     petContextMenuWindow.setPosition(x, y);
     petContextMenuWindow.show();
     petContextMenuWindow.focus();
+    elevatePetAboveCompanionWindows();
   };
 
   if (petContextMenuWindow.webContents.isLoading()) {

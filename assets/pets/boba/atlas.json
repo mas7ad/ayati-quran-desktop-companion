@@ -6,14 +6,88 @@
   "sheetHeight": 1872,
   "fps": 8,
   "clips": {
-    "idle": { "start": 0, "length": 6, "fps": 1 },
-    "running-right": { "start": 8, "length": 8 },
-    "running-left": { "start": 16, "length": 8 },
-    "waving": { "start": 24, "length": 4 },
-    "jumping": { "start": 32, "length": 5 },
-    "failed": { "start": 40, "length": 8 },
-    "waiting": { "start": 48, "length": 6 },
-    "running": { "start": 56, "length": 6 },
-    "review": { "start": 64, "length": 6 }
+    "idle": {
+      "start": 0,
+      "length": 6,
+      "fps": 1
+    },
+    "running-right": {
+      "start": 8,
+      "length": 8
+    },
+    "running-left": {
+      "start": 16,
+      "length": 8
+    },
+    "waving": {
+      "start": 24,
+      "length": 4
+    },
+    "jumping": {
+      "start": 32,
+      "length": 5
+    },
+    "failed": {
+      "start": 40,
+      "length": 8
+    },
+    "waiting": {
+      "start": 48,
+      "length": 6
+    },
+    "running": {
+      "start": 56,
+      "length": 6
+    },
+    "review": {
+      "start": 64,
+      "length": 6
+    },
+    "happy": {
+      "start": 24,
+      "length": 4
+    },
+    "curious": {
+      "start": 48,
+      "length": 6
+    },
+    "thinking": {
+      "start": 64,
+      "length": 6
+    },
+    "excited": {
+      "start": 32,
+      "length": 5
+    },
+    "doze": {
+      "start": 0,
+      "length": 6,
+      "fps": 1
+    },
+    "sleeping": {
+      "start": 0,
+      "length": 6,
+      "fps": 1
+    },
+    "startle": {
+      "start": 32,
+      "length": 5
+    },
+    "proud": {
+      "start": 24,
+      "length": 4
+    },
+    "mad": {
+      "start": 40,
+      "length": 8
+    },
+    "spin": {
+      "start": 32,
+      "length": 5
+    },
+    "surprised": {
+      "start": 64,
+      "length": 6
+    }
   }
 }

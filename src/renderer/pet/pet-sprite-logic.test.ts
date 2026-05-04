@@ -34,19 +34,46 @@ describe('pet sprite logic', () => {
     }
   });
 
-  it('recognizes future mood states and maps them to current fallback clips', () => {
+  it('uses generated expanded mood strips directly when available', () => {
+    const directMoods = [
+      'curious',
+      'thinking',
+      'excited',
+      'doze',
+      'sleeping',
+      'startle',
+      'proud',
+      'mad',
+      'spin',
+      'surprised',
+    ] as const;
+
+    for (const mood of directMoods) {
+      expect(normalizeIncomingPetState(mood)).toBe(mood);
+      expect(resolveSpriteClip({
+        visualState: mood,
+        isWalking: false,
+        walkDirection: null,
+        wakeWindowFlightActive: false,
+        cameraSnapActive: false,
+        userDragRun: null,
+      })).toBe(mood);
+    }
+  });
+
+  it('keeps mood clip ids stable for fallback and generated mood states', () => {
     const fallbackClips: Record<LegacyMood, string> = {
-      happy: 'waving',
-      curious: 'waiting',
-      thinking: 'review',
-      excited: 'jumping',
-      doze: 'idle',
-      sleeping: 'idle',
-      startle: 'jumping',
-      proud: 'waving',
-      mad: 'failed',
-      spin: 'jumping',
-      surprised: 'review',
+      happy: 'happy',
+      curious: 'curious',
+      thinking: 'thinking',
+      excited: 'excited',
+      doze: 'doze',
+      sleeping: 'sleeping',
+      startle: 'startle',
+      proud: 'proud',
+      mad: 'mad',
+      spin: 'spin',
+      surprised: 'surprised',
     };
 
     for (const [mood, clip] of Object.entries(fallbackClips) as Array<[LegacyMood, string]>) {

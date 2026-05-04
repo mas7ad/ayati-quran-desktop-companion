@@ -3,6 +3,14 @@
   "version": "0.0.1",
   "license": "SEE LICENSE IN LICENSE",
   "author": "Mikhail Wijanarko",
+  "homepage": "https://ayati-website.vercel.app/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mwijanarko1/ayati-quran-desktop-companion.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mwijanarko1/ayati-quran-desktop-companion/issues"
+  },
   "description": "Ayati - Quran Desktop Companion, a Quran-focused screen companion powered by OpenRouter",
   "main": "dist/main/main.js",
   "packageManager": "bun@1.3.10",
@@ -64,10 +72,11 @@
   "build": {
     "appId": "com.ayati.quran-desktop-companion",
     "productName": "Ayati - Quran Desktop Companion",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "icon": "assets/icon.png",
     "npmRebuild": false,
     "mac": {
-      "identity": "Yuwen Wu (39428U49B4)",
+      "identity": "Developer ID Application: Mikhail Wijanarko (WH4MT5Z44S)",
       "category": "public.app-category.productivity",
       "target": [
         {
@@ -89,7 +98,7 @@
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "notarize": {
-        "teamId": "39428U49B4"
+        "teamId": "WH4MT5Z44S"
       },
       "extendInfo": {
         "NSScreenCaptureUsageDescription": "Ayati - Quran Desktop Companion needs screen capture permission to suggest Quran reflections for what is on your screen.",

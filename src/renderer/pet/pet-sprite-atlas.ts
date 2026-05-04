@@ -26,7 +26,18 @@ export type PetClipId =
   | 'failed'
   | 'waiting'
   | 'running'
-  | 'review';
+  | 'review'
+  | 'happy'
+  | 'curious'
+  | 'sleeping'
+  | 'thinking'
+  | 'excited'
+  | 'doze'
+  | 'startle'
+  | 'proud'
+  | 'mad'
+  | 'spin'
+  | 'surprised';
 
 export type PetSpriteAtlasClip = {
   start?: number;
@@ -69,6 +80,17 @@ const CLIP_ORDER: PetClipId[] = [
   'waiting',
   'running',
   'review',
+  'happy',
+  'curious',
+  'sleeping',
+  'thinking',
+  'excited',
+  'doze',
+  'startle',
+  'proud',
+  'mad',
+  'spin',
+  'surprised',
 ];
 
 const CLIP_SET = new Set<string>(CLIP_ORDER);
@@ -112,7 +134,7 @@ function getClipStripUrlForAppearance(id: PetAppearanceId, stripPath: string): s
   }
 
   const normalizedStripPath = stripPath.replace(/^\.?\//, '');
-  const scopedPath = normalizedStripPath.includes('/')
+  const scopedPath = normalizedStripPath.startsWith('pets/')
     ? normalizedStripPath
     : `pets/${id}/${normalizedStripPath}`;
   const modulePath = `../../../assets/${scopedPath}`;

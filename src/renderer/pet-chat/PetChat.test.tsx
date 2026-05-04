@@ -304,7 +304,7 @@ describe('PetChat', () => {
     expect(await screen.findByText(/reflection note saved/i)).toBeInTheDocument();
   });
 
-  it('saves the linked reflection when a Quran nudge asks to save', async () => {
+  it('saves the linked verse reminder when a Quran nudge asks to save', async () => {
     const user = userEvent.setup();
     const { sendPetMessage } = installMockAyati();
     vi.mocked(window.ayati.saveAyahReflection).mockResolvedValue({
@@ -342,7 +342,8 @@ describe('PetChat', () => {
     await waitFor(() => {
       expect(window.ayati.saveAyahReflection).toHaveBeenCalledWith('reflection-1');
     });
-    expect(await screen.findByText(/saved this reflection/i)).toBeInTheDocument();
+    expect(await screen.findByText(/saved this verse reminder/i)).toBeInTheDocument();
+    expect(screen.queryByText(/saved this reflection/i)).not.toBeInTheDocument();
   });
 
   it('dismisses Quran nudges when the user chooses Dismiss', () => {
