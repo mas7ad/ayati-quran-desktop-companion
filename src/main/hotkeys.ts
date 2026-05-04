@@ -2,6 +2,7 @@ export const DEFAULT_HOTKEYS = {
   openChat: 'CommandOrControl+Alt+,',
   captureScreen: 'CommandOrControl+Alt+/',
   openAssistant: 'CommandOrControl+Alt+.',
+  hideApp: 'CommandOrControl+Alt+Shift+,',
 } as const;
 
 const MODIFIER_ALIASES = new Map<string, string>([

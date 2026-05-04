@@ -285,6 +285,7 @@ interface OnboardingData {
   hotkeyOpenChat: string;
   hotkeyCaptureScreen: string;
   hotkeyOpenAssistant: string;
+  hotkeyHideApp: string;
 }
 
 interface CurrentWorkspaceInfo {

@@ -592,6 +592,7 @@ export interface OnboardingData {
   hotkeyOpenChat: string;
   hotkeyCaptureScreen: string;
   hotkeyOpenAssistant: string;
+  hotkeyHideApp: string;
 }
 
 export interface CurrentWorkspaceInfo {

@@ -22,6 +22,7 @@ export interface OnboardingData {
   hotkeyOpenChat: string;
   hotkeyCaptureScreen: string;
   hotkeyOpenAssistant: string;
+  hotkeyHideApp: string;
 }
 
 const INITIAL_DATA: OnboardingData = {
@@ -37,6 +38,7 @@ const INITIAL_DATA: OnboardingData = {
   hotkeyOpenChat: 'CommandOrControl+Alt+,',
   hotkeyCaptureScreen: 'CommandOrControl+Alt+/',
   hotkeyOpenAssistant: 'CommandOrControl+Alt+.',
+  hotkeyHideApp: 'CommandOrControl+Alt+Shift+,',
 };
 
 type Step = 'welcome' | 'apiKeys' | 'watch' | 'hotkeys' | 'complete';

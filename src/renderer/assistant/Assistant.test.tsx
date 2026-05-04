@@ -497,11 +497,14 @@ describe('Assistant settings shortcuts', () => {
     const openAssistant = screen.getByText('Open Assistant');
     const reflectOnScreen = screen.getByText('Reflect on Screen');
 
+    const hideApp = screen.getByText('Hide App');
     expect(openChat.compareDocumentPosition(openAssistant) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(openAssistant.compareDocumentPosition(reflectOnScreen) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(reflectOnScreen.compareDocumentPosition(hideApp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole('button', { name: /change open chat shortcut, currently ⌘ \+ ⌥ \+ ,/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /change open assistant shortcut, currently ⌘ \+ ⌥ \+ \./i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /change reflect on screen shortcut, currently ⌘ \+ ⌥ \+ \//i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /change hide app shortcut, currently ⌘ \+ ⌥ \+ ⇧ \+ ,/i })).toBeInTheDocument();
   });
 });
 

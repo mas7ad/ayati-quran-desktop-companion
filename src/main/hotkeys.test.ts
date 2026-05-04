@@ -8,6 +8,7 @@ describe('DEFAULT_HOTKEYS', () => {
       openChat: 'CommandOrControl+Alt+,',
       openAssistant: 'CommandOrControl+Alt+.',
       captureScreen: 'CommandOrControl+Alt+/',
+      hideApp: 'CommandOrControl+Alt+Shift+,',
     });
   });
 });

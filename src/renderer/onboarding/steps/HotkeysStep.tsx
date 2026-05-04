@@ -46,6 +46,14 @@ export const HotkeysStep: React.FC<Props> = ({ data, updateData }) => {
             onChange={(value) => updateData({ hotkeyCaptureScreen: value })}
             theme="setupInverted"
           />
+          <div className="h-px bg-[#1a2a24]/[0.05] mx-6" />
+          <HotkeyInput
+            label="Hide App"
+            description="Hide or show all Ayati windows (same shortcut toggles)"
+            value={data.hotkeyHideApp}
+            onChange={(value) => updateData({ hotkeyHideApp: value })}
+            theme="setupInverted"
+          />
         </div>
       </div>
 

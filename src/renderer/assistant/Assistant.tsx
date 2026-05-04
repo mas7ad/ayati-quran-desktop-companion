@@ -2211,6 +2211,12 @@ export const Assistant: React.FC = () => {
                 value={(settings.hotkeys as { captureScreen?: string })?.captureScreen || 'CommandOrControl+Alt+/ '}
                 onChange={(value) => updateSetting('hotkeys.captureScreen', value)}
               />
+              <HotkeyInput
+                label="Hide App"
+                description="Hide or show all Ayati windows (same shortcut toggles)"
+                value={(settings.hotkeys as { hideApp?: string })?.hideApp || 'CommandOrControl+Alt+Shift+,'}
+                onChange={(value) => updateSetting('hotkeys.hideApp', value)}
+              />
             </div>
           </SettingsSection>
 

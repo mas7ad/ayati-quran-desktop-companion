@@ -164,6 +164,16 @@ const DEFAULT_TRAY_TOOLTIP = 'Ayati - Quran Desktop Companion';
 let isChatbarWindowReady = false;
 let shouldRevealChatbarWhenReady = false;
 let shouldRevealAssistantWhenReady = false;
+
+/** Main surfaces only — used to restore after global "hide app" shortcut; transients (screenshot modal, pet chat) are not re-shown. */
+type CompanionHideSnapshot = {
+  pet: boolean;
+  assistant: boolean;
+  chatbar: boolean;
+  workspaceBrowser: boolean;
+};
+
+let companionSnapshotForRestore: CompanionHideSnapshot | null = null;
 let pendingPetChatReveal = false;
 let petChatRevealTimeout: NodeJS.Timeout | null = null;
 let petChatAutoHideTimeout: NodeJS.Timeout | null = null;
@@ -3853,6 +3863,107 @@ function toggleScreenshotQuestionWindow() {
   }
 }
 
+function captureMainCompanionVisibility(): CompanionHideSnapshot {
+  return {
+    pet: Boolean(petWindow && !petWindow.isDestroyed() && petWindow.isVisible()),
+    assistant: Boolean(assistantWindow && !assistantWindow.isDestroyed() && assistantWindow.isVisible()),
+    chatbar: Boolean(chatbarWindow && !chatbarWindow.isDestroyed() && chatbarWindow.isVisible()),
+    workspaceBrowser: Boolean(
+      workspaceBrowserWindow && !workspaceBrowserWindow.isDestroyed() && workspaceBrowserWindow.isVisible(),
+    ),
+  };
+}
+
+function anyHideAllTargetWindowVisible(): boolean {
+  if (petWindow && !petWindow.isDestroyed() && petWindow.isVisible()) return true;
+  if (assistantWindow && !assistantWindow.isDestroyed() && assistantWindow.isVisible()) return true;
+  if (chatbarWindow && !chatbarWindow.isDestroyed() && chatbarWindow.isVisible()) return true;
+  if (screenshotQuestionWindow && !screenshotQuestionWindow.isDestroyed() && screenshotQuestionWindow.isVisible()) {
+    return true;
+  }
+  if (petChatWindow && !petChatWindow.isDestroyed() && petChatWindow.isVisible()) return true;
+  if (petContextMenuWindow && !petContextMenuWindow.isDestroyed() && petContextMenuWindow.isVisible()) return true;
+  if (workspaceBrowserWindow && !workspaceBrowserWindow.isDestroyed() && workspaceBrowserWindow.isVisible()) {
+    return true;
+  }
+  return false;
+}
+
+function restoreMainCompanionFromSnapshot(snapshot: CompanionHideSnapshot): void {
+  if (snapshot.pet && petWindow && !petWindow.isDestroyed()) {
+    petWindow.show();
+    petWindow.focus();
+    elevatePetAboveCompanionWindows();
+  }
+  if (snapshot.workspaceBrowser && workspaceBrowserWindow && !workspaceBrowserWindow.isDestroyed()) {
+    workspaceBrowserWindow.show();
+    workspaceBrowserWindow.focus();
+    elevateWorkspaceBrowserAboveCompanionWindows();
+  }
+  if (snapshot.assistant && assistantWindow && !assistantWindow.isDestroyed()) {
+    revealAssistantWindow();
+    elevateWorkspaceBrowserAboveCompanionWindows();
+  }
+  if (snapshot.chatbar) {
+    if (chatbarWindow && !chatbarWindow.isDestroyed()) {
+      if (isChatbarWindowReady) {
+        chatbarWindow.show();
+        chatbarWindow.focus();
+        elevateWorkspaceBrowserAboveCompanionWindows();
+      } else {
+        shouldRevealChatbarWhenReady = true;
+      }
+    } else {
+      shouldRevealChatbarWhenReady = true;
+      createChatbarWindow();
+    }
+  }
+}
+
+function toggleHideAllCompanionWindows(): void {
+  const anyVisible = anyHideAllTargetWindowVisible();
+
+  if (anyVisible) {
+    companionSnapshotForRestore = captureMainCompanionVisibility();
+    hideAllWindows();
+    return;
+  }
+
+  const snap =
+    companionSnapshotForRestore ??
+    ({ pet: true, assistant: false, chatbar: false, workspaceBrowser: false } satisfies CompanionHideSnapshot);
+  companionSnapshotForRestore = null;
+  restoreMainCompanionFromSnapshot(snap);
+}
+
+function hideAllWindows() {
+  shouldRevealAssistantWhenReady = false;
+  shouldRevealChatbarWhenReady = false;
+
+  if (assistantWindow && !assistantWindow.isDestroyed()) {
+    assistantWindow.hide();
+  }
+  if (chatbarWindow && !chatbarWindow.isDestroyed()) {
+    chatbarWindow.hide();
+  }
+  if (screenshotQuestionWindow && !screenshotQuestionWindow.isDestroyed()) {
+    screenshotQuestionWindow.hide();
+  }
+  if (petChatWindow && !petChatWindow.isDestroyed()) {
+    petChatWindow.hide();
+  }
+  if (petContextMenuWindow && !petContextMenuWindow.isDestroyed()) {
+    petContextMenuWindow.hide();
+  }
+  if (workspaceBrowserWindow && !workspaceBrowserWindow.isDestroyed()) {
+    workspaceBrowserWindow.hide();
+  }
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.hide();
+  }
+}
+
+
 function createOnboardingWindow(): Promise<void> {
   return new Promise((resolve) => {
     console.log('[Onboarding] createOnboardingWindow called');
@@ -5141,6 +5252,7 @@ function setupIPC() {
     hotkeyOpenChat: string;
     hotkeyCaptureScreen: string;
     hotkeyOpenAssistant: string;
+    hotkeyHideApp: string;
   }) => {
     // Save onboarding data to store
     store.set('onboarding.completed', true);
@@ -5167,6 +5279,7 @@ function setupIPC() {
     store.set('hotkeys.openChat', sanitizeAccelerator(data.hotkeyOpenChat, DEFAULT_HOTKEYS.openChat));
     store.set('hotkeys.captureScreen', sanitizeAccelerator(data.hotkeyCaptureScreen, DEFAULT_HOTKEYS.captureScreen));
     store.set('hotkeys.openAssistant', sanitizeAccelerator(data.hotkeyOpenAssistant, DEFAULT_HOTKEYS.openAssistant));
+    store.set('hotkeys.hideApp', sanitizeAccelerator(data.hotkeyHideApp, DEFAULT_HOTKEYS.hideApp));
     setLaunchOnStartup(data.launchOnStartup);
 
     // Update ClawBotClient with new config
@@ -5297,6 +5410,8 @@ function normalizeSettingsValue(key: string, value: unknown): unknown {
       return sanitizeAccelerator(value, DEFAULT_HOTKEYS.captureScreen);
     case 'hotkeys.openAssistant':
       return sanitizeAccelerator(value, DEFAULT_HOTKEYS.openAssistant);
+    case 'hotkeys.hideApp':
+      return sanitizeAccelerator(value, DEFAULT_HOTKEYS.hideApp);
     case 'pet.appearanceId': {
       const v = typeof value === 'string' ? value : '';
       if (v === 'ayah' || v === 'bolt' || v === 'cloudlet' || v === 'cosmo' || v === 'boba') {
@@ -5357,6 +5472,11 @@ function registerHotkeys() {
     toggleScreenshotQuestionWindow();
   });
   console.log(`[Hotkeys] Registered capture screen: ${hotkeyCaptureScreen}`);
+
+  const hotkeyHideApp = registerConfiguredHotkey('hotkeys.hideApp', DEFAULT_HOTKEYS.hideApp, () => {
+    toggleHideAllCompanionWindows();
+  });
+  console.log(`[Hotkeys] Registered hide app: ${hotkeyHideApp}`);
 }
 
 function registerConfiguredHotkey(key: string, fallback: string, callback: () => void): string {
