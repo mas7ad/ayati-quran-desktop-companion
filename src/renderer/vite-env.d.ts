@@ -429,7 +429,9 @@ interface AyatiAPI {
   saveAyahReflection: (reflectionId: string) => Promise<AyahReflection | null>;
   getAyahReflectionHistory: () => Promise<AyahReflection[]>;
   deleteAyahReflection: (reflectionId: string) => Promise<boolean>;
-  getAyahTafsir: (reflectionId: string) => Promise<AyahReflection | null>;
+  getAyahTafsir: (reflectionId: string, resourceId?: number) => Promise<AyahReflection | null>;
+  getAyahTafsirResources: () => Promise<Array<{ id: number; name: string; languageName?: string }>>;
+  getAyahTranslationResources: () => Promise<Array<{ id: number; name: string; languageName?: string }>>;
   getAyahAudio: (reflectionId: string) => Promise<AyahReflection | null>;
   saveAyahReflectionNote: (reflectionId: string, body: string) => Promise<AyahReflection | null>;
   getAyahCollections: () => Promise<AyahCollection[]>;

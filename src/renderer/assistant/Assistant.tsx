@@ -5,6 +5,7 @@ import { MarkdownMessage } from '../components/MarkdownMessage';
 import { QulArabicText } from '../components/QulArabicText';
 import { HotkeyInput } from '../components/HotkeyInput';
 import { AiProviderSettingsFields } from '../components/AiProviderSettingsFields';
+import { SettingsSection } from '../components/SettingsSection';
 import {
   DEFAULT_AI_PROVIDER,
   getAiProviderConfig,
@@ -20,6 +21,7 @@ import { getClientPomodoroRemainingMs } from '../../shared/pomodoro-client';
 import { getNextPrayer } from '../../shared/prayer-schedule';
 import { filterAvailableRecitationResources } from '../../shared/quran-reciter-preferences';
 import { getAtlasForAppearance, type PetClipId } from '../pet/pet-sprite-atlas';
+import { getTafsirParagraphs } from '../screenshot-question/AyahVerseCard';
 
 interface Message {
   id: string;
@@ -195,9 +197,39 @@ function isUpdateButtonDisabled(state: DesktopUpdateState | null): boolean {
   return state.status === 'checking' || state.status === 'downloading';
 }
 
-function shouldShowUpdateBadge(state: DesktopUpdateState | null): boolean {
-  return state?.status === 'available' || state?.status === 'downloaded' || state?.status === 'downloading';
+function shouldShowTitleBarUpdateButton(state: DesktopUpdateState | null): boolean {
+  if (!state?.enabled) return false;
+  if (state.status === 'available' || state.status === 'downloading' || state.status === 'downloaded') {
+    return true;
+  }
+  return state.status === 'error' && state.canRetry;
 }
+
+function getTitleBarUpdateButtonText(state: DesktopUpdateState | null): string {
+  if (!state) return 'Update';
+  if (state.status === 'available') return 'Update';
+  if (state.status === 'downloading') {
+    return typeof state.downloadPercent === 'number'
+      ? `Downloading ${Math.floor(state.downloadPercent)}%`
+      : 'Downloading…';
+  }
+  if (state.status === 'downloaded') return 'Restart to update';
+  if (state.status === 'error' && state.canRetry) return 'Retry update';
+  return 'Update';
+}
+
+function getReflectionBookmarkButtonLabel(reflection: AyahReflection): string {
+  if (reflection.syncState === 'synced') return 'Synced';
+  if (reflection.savedAt) return 'Sync Bookmark';
+  return 'Save Bookmark';
+}
+
+function catalogLanguageLabel(resource: { languageName?: string }): string {
+  const raw = resource.languageName?.trim();
+  return raw && raw.length > 0 ? raw : 'Other';
+}
+
+type QuranContentListResource = { id: number; name: string; languageName?: string };
 
 export const Assistant: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('prayers');
@@ -217,6 +249,7 @@ export const Assistant: React.FC = () => {
   const [reflectionStatusFilter, setReflectionStatusFilter] = useState<'all' | 'saved' | 'pending'>('all');
   const [reflectionThemeFilter, setReflectionThemeFilter] = useState<'all' | AyahTheme>('all');
   const [reflectionFeedbackFilter, setReflectionFeedbackFilter] = useState<'all' | 'relevant' | 'not_relevant'>('all');
+  const [reflectionActionsMenuId, setReflectionActionsMenuId] = useState<string | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [prayerSettings, setPrayerSettings] = useState<PrayerSettings | null>(null);
   const [prayerDay, setPrayerDay] = useState<PrayerDay | null>(null);
@@ -234,7 +267,6 @@ export const Assistant: React.FC = () => {
   const [pomodoroUiTick, setPomodoroUiTick] = useState(0);
   const [selectedFocusTodoId, setSelectedFocusTodoId] = useState('');
   const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null);
-  const [updateStatusMessage, setUpdateStatusMessage] = useState('');
   const selectedPetAppearanceId = normalizePetAppearanceId(
     (settings.pet as { appearanceId?: unknown } | undefined)?.appearanceId,
   );
@@ -246,6 +278,9 @@ export const Assistant: React.FC = () => {
   const [quranStatusMessage, setQuranStatusMessage] = useState('');
   const [qulFontPacks, setQulFontPacks] = useState<Record<string, boolean> | null>(null);
   const [recitationResources, setRecitationResources] = useState<QuranRecitationResource[]>([]);
+  const [tafsirResources, setTafsirResources] = useState<QuranContentListResource[]>([]);
+  const [translationResources, setTranslationResources] = useState<QuranContentListResource[]>([]);
+  const [translationLanguageFilter, setTranslationLanguageFilter] = useState<string>('all');
   const todoAddDropdownRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -307,6 +342,26 @@ export const Assistant: React.FC = () => {
     return `${ayahSettings.qulMushafKey ?? ''}:${Boolean(ayahSettings.qulTajweedEnabled)}:${ayahSettings.qulArabicEnabled !== false}`;
   }, [ayahSettings]);
 
+  const translationCatalogLanguages = useMemo(() => {
+    const labels = new Set<string>();
+    for (const t of translationResources) {
+      labels.add(catalogLanguageLabel(t));
+    }
+    return Array.from(labels).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [translationResources]);
+
+  const translationsForSettingsPicker = useMemo(() => {
+    let list = translationResources;
+    if (translationLanguageFilter !== 'all') {
+      list = list.filter((t) => catalogLanguageLabel(t) === translationLanguageFilter);
+    }
+    return [...list].sort((a, b) => {
+      const byLang = (a.languageName || '').localeCompare(b.languageName || '', undefined, { sensitivity: 'base' });
+      if (byLang !== 0) return byLang;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
+  }, [translationResources, translationLanguageFilter]);
+
   useEffect(() => {
     void window.ayati.getQulFontPacks().then(setQulFontPacks).catch(() => setQulFontPacks(null));
   }, []);
@@ -328,6 +383,8 @@ export const Assistant: React.FC = () => {
     window.ayati.getAyahRecitationResources?.()
       .then((resources) => setRecitationResources(filterAvailableRecitationResources(resources)))
       .catch(() => setRecitationResources([]));
+    void window.ayati.getAyahTafsirResources().then(setTafsirResources).catch(() => setTafsirResources([]));
+    void window.ayati.getAyahTranslationResources().then(setTranslationResources).catch(() => setTranslationResources([]));
     window.ayati.getQuranAuthStatus().then(setQuranAuthStatus);
     window.ayati.getAyahReflectionHistory().then(setReflections);
     window.ayati.getAyahCollections?.().then(setCollections);
@@ -634,6 +691,13 @@ export const Assistant: React.FC = () => {
     setAyahSettings(nextSettings);
   }, []);
 
+  useEffect(() => {
+    if (translationsForSettingsPicker.length === 0 || !ayahSettings) return;
+    if (!translationsForSettingsPicker.some((t) => t.id === ayahSettings.translationId)) {
+      void updateAyahSetting('translationId', translationsForSettingsPicker[0].id);
+    }
+  }, [translationsForSettingsPicker, ayahSettings, updateAyahSetting]);
+
   const updateReminderListenReciter = useCallback(async (rawRecitationId: string) => {
     const recitationId = Number(rawRecitationId);
     const resource = recitationResources.find((item) => item.id === recitationId);
@@ -644,6 +708,27 @@ export const Assistant: React.FC = () => {
     setAyahSettings(namedSettings);
   }, [recitationResources]);
 
+  const handleSettingsTafsirSelectChange = useCallback(
+    async (event: React.ChangeEvent<HTMLSelectElement>) => {
+      const raw = event.target.value;
+      if (!raw) {
+        await updateAyahSetting('tafsirResourceId', null);
+        await updateAyahSetting('tafsirResourceName', null);
+        return;
+      }
+      const id = Number(raw);
+      if (!Number.isInteger(id) || id <= 0) return;
+      const resource = tafsirResources.find((r) => r.id === id);
+      await updateAyahSetting('tafsirResourceId', id);
+      if (resource?.name) await updateAyahSetting('tafsirResourceName', resource.name);
+    },
+    [tafsirResources, updateAyahSetting],
+  );
+
+  const handleTranslationLanguageFilterChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+    setTranslationLanguageFilter(event.target.value);
+  }, []);
+
   const handleUpdateAction = useCallback(async () => {
     if (isUpdateButtonDisabled(updateState)) return;
 
@@ -652,11 +737,9 @@ export const Assistant: React.FC = () => {
       if (action === 'download') {
         const result = await window.ayati.downloadUpdate();
         setUpdateState(result.state);
-        setUpdateStatusMessage(
-          result.completed
-            ? 'Update downloaded. Restart Ayati - Quran Desktop Companion to install it.'
-            : result.state.message ?? 'Could not start the update download.',
-        );
+        if (!result.completed && result.state.message) {
+          alert(result.state.message);
+        }
         return;
       }
 
@@ -666,20 +749,18 @@ export const Assistant: React.FC = () => {
         const result = await window.ayati.installUpdate();
         setUpdateState(result.state);
         if (!result.accepted && result.state.message) {
-          setUpdateStatusMessage(result.state.message);
+          alert(result.state.message);
         }
         return;
       }
 
       const result = await window.ayati.checkForUpdate();
       setUpdateState(result.state);
-      setUpdateStatusMessage(
-        result.checked
-          ? getUpdateStatusLabel(result.state)
-          : result.state.message ?? 'Automatic updates are not available in this build.',
-      );
+      if (!result.checked && result.state.message) {
+        alert(result.state.message ?? 'Automatic updates are not available in this build.');
+      }
     } catch (error) {
-      setUpdateStatusMessage(error instanceof Error ? error.message : 'Update action failed.');
+      alert(error instanceof Error ? error.message : 'Update action failed.');
     }
   }, [updateState]);
 
@@ -725,9 +806,12 @@ export const Assistant: React.FC = () => {
   }, [refreshReflections]);
 
   const loadReflectionTafsir = useCallback(async (reflectionId: string) => {
-    await window.ayati.getAyahTafsir(reflectionId);
+    const resourceId = typeof ayahSettings?.tafsirResourceId === 'number' && ayahSettings.tafsirResourceId > 0
+      ? ayahSettings.tafsirResourceId
+      : undefined;
+    await window.ayati.getAyahTafsir(reflectionId, resourceId);
     await refreshReflections();
-  }, [refreshReflections]);
+  }, [refreshReflections, ayahSettings?.tafsirResourceId]);
 
   const loadReflectionAudio = useCallback(async (reflectionId: string) => {
     await window.ayati.getAyahAudio(reflectionId);
@@ -762,20 +846,25 @@ export const Assistant: React.FC = () => {
     await refreshReflections();
   }, [refreshReflections]);
 
-  const showAlternateFromPanel = useCallback(async (reflectionId: string) => {
-    const alternate = await window.ayati.showAlternateAyah(reflectionId);
-    await refreshReflections();
-    setQuranStatusMessage(
-      alternate
-        ? `Another ayah: ${alternate.surahName} ${alternate.verseKey}`
-        : 'No stronger alternate ayah is available for this reflection.',
-    );
-  }, [refreshReflections]);
-
   const copyShareCardFromPanel = useCallback(async (reflectionId: string) => {
     const copied = await window.ayati.copyReflectionShareCard(reflectionId);
     setQuranStatusMessage(copied ? 'Share card copied.' : 'Could not copy this reflection.');
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'reflections') setReflectionActionsMenuId(null);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!reflectionActionsMenuId) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.('[data-reflection-actions-menu-root]')) return;
+      setReflectionActionsMenuId(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [reflectionActionsMenuId]);
 
   const savePrayerSettings = useCallback(async () => {
     if (!prayerDraft) return;
@@ -1016,18 +1105,41 @@ export const Assistant: React.FC = () => {
   return (
     <div className="flex flex-col h-screen bg-[#0f0f0f] text-neutral-200 overflow-hidden">
       {/* Header */}
-      <div className="h-12 border-b border-white/5 flex items-center justify-between px-4 select-none shrink-0 bg-[#0f0f0f] drag-region">
-        <div className="flex items-center min-w-0">
+      <div className="h-12 border-b border-white/5 flex items-center justify-between gap-2 px-4 select-none shrink-0 bg-[#0f0f0f] drag-region">
+        <div className="flex items-center min-w-0 flex-1">
           <span className="min-w-0 truncate text-sm font-medium tracking-tight text-white" title="Ayati - Quran Desktop Companion">
             Ayati - Quran Desktop Companion
           </span>
         </div>
-        <button
-          className="no-drag text-neutral-500 hover:text-white transition-colors flex items-center justify-center w-6 h-6"
-          onClick={closeWindow}
-        >
-          <Icon icon="solar:close-circle-linear" className="text-lg" />
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0 no-drag">
+          {shouldShowTitleBarUpdateButton(updateState) && (
+            <button
+              type="button"
+              onClick={handleUpdateAction}
+              disabled={isUpdateButtonDisabled(updateState)}
+              className="flex items-center gap-1.5 max-w-[min(200px,42vw)] px-2.5 py-1 rounded-md text-xs font-semibold bg-[#67E0A3] text-[#07120f] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              title={getUpdateStatusLabel(updateState)}
+              aria-label={getUpdateButtonLabel(updateState)}
+            >
+              <Icon
+                icon={
+                  getUpdateAction(updateState) === 'install'
+                    ? 'solar:restart-linear'
+                    : 'solar:download-linear'
+                }
+                className="text-base shrink-0"
+              />
+              <span className="truncate">{getTitleBarUpdateButtonText(updateState)}</span>
+            </button>
+          )}
+          <button
+            className="text-neutral-500 hover:text-white transition-colors flex items-center justify-center w-6 h-6"
+            onClick={closeWindow}
+            aria-label="Close assistant"
+          >
+            <Icon icon="solar:close-circle-linear" className="text-lg" />
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -1074,16 +1186,13 @@ export const Assistant: React.FC = () => {
         </button>
         <button
           onClick={() => switchTab('settings')}
-          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors inline-flex items-center gap-1.5 ${
+          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
             activeTab === 'settings'
               ? 'text-[#67E0A3] border-[#67E0A3]'
               : 'text-neutral-500 border-transparent hover:text-neutral-300'
           }`}
         >
           Settings
-          {shouldShowUpdateBadge(updateState) && (
-            <span className="w-1.5 h-1.5 rounded-full bg-[#67E0A3]" aria-hidden="true" />
-          )}
         </button>
       </div>
 
@@ -1109,7 +1218,7 @@ export const Assistant: React.FC = () => {
             <section className="border border-white/10 rounded-md p-3 bg-white/[0.03]">
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Country</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Country</span>
                   <select
                     aria-label="Prayer country"
                     value={currentPrayerDraft.country}
@@ -1127,7 +1236,7 @@ export const Assistant: React.FC = () => {
                   </select>
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">City</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">City</span>
                   <select
                     aria-label="Prayer city"
                     value={currentPrayerDraft.city}
@@ -1149,7 +1258,7 @@ export const Assistant: React.FC = () => {
                   Enable Prayer Awareness
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Reminder Lead Minutes</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Reminder Lead Minutes</span>
                   <input
                     type="number"
                     min={0}
@@ -1160,7 +1269,7 @@ export const Assistant: React.FC = () => {
                   />
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Calculation Method</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Calculation Method</span>
                   <select
                     aria-label="Prayer calculation method"
                     value={currentPrayerDraft.method}
@@ -1178,7 +1287,7 @@ export const Assistant: React.FC = () => {
                   <p className="text-[11px] text-neutral-500 mt-1.5 leading-snug" role="note">{PRAYER_CALCULATION_METHOD_UK_NOTE}</p>
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Juristic School</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Juristic School</span>
                   <select
                     aria-label="Prayer juristic school"
                     value={currentPrayerDraft.school}
@@ -1393,18 +1502,28 @@ export const Assistant: React.FC = () => {
       {/* CONTENT: Reflections */}
       {activeTab === 'reflections' && (
         <div className="flex-1 flex flex-col overflow-y-auto p-4 scrollbar-hide">
-          <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
             <div>
               <h2 className="text-sm font-semibold text-white">Recent Reflections</h2>
               <p className="text-xs text-neutral-500 mt-1">Screenshots stay transient; only text summaries are saved.</p>
             </div>
-            <button
-              onClick={reflectOnScreen}
-              disabled={isLoading}
-              className="px-3 py-2 bg-[#67E0A3] text-[#07120f] rounded-md text-xs font-semibold disabled:opacity-60"
-            >
-              Reflect on Screen
-            </button>
+            <div className="flex flex-wrap gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={createCollectionFromPanel}
+                className="px-3 py-2 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
+              >
+                Create Collection
+              </button>
+              <button
+                type="button"
+                onClick={reflectOnScreen}
+                disabled={isLoading}
+                className="px-3 py-2 bg-[#67E0A3] text-[#07120f] rounded-md text-xs font-semibold disabled:opacity-60"
+              >
+                Reflect on Screen
+              </button>
+            </div>
           </div>
 
           {quranStatusMessage && (
@@ -1515,10 +1634,38 @@ export const Assistant: React.FC = () => {
                   <p className="text-xs leading-relaxed text-neutral-500 mt-3">
                     {reflection.whyThisVerse}
                   </p>
-                  {reflection.tafsir && (
-                    <p className="text-xs leading-relaxed text-neutral-400 mt-3 border-l border-[#67E0A3]/40 pl-3">
-                      <span className="text-[#AFF9C9]">Tafsir:</span> {reflection.tafsir.text}
-                    </p>
+                  {reflection.tafsir?.text?.trim() && (
+                    <section
+                      className="mt-3 border-l border-[#67E0A3]/40 pl-3"
+                      aria-label="Tafsir"
+                    >
+                      <div className="flex justify-end mb-2">
+                        <button
+                          type="button"
+                          onClick={() => loadReflectionTafsir(reflection.id)}
+                          className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
+                        >
+                          Reload tafsir
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mb-2">
+                        <span className="text-[11px] font-medium text-[#AFF9C9]">Tafsir</span>
+                        {reflection.tafsir.resourceName && (
+                          <span className="text-[10px] text-neutral-500">{reflection.tafsir.resourceName}</span>
+                        )}
+                      </div>
+                      <div className="space-y-2.5">
+                        {getTafsirParagraphs(reflection.tafsir.text).map((paragraph, index) => (
+                          <p
+                            key={`${reflection.id}-tafsir-${index}`}
+                            className="text-xs leading-relaxed text-neutral-400"
+                            translate="no"
+                          >
+                            {paragraph}
+                          </p>
+                        ))}
+                      </div>
+                    </section>
                   )}
                   {reflection.audio?.url && (
                     <audio aria-label={`Recitation for ${reflection.verseKey}`} controls src={reflection.audio.url} className="mt-3 w-full" />
@@ -1531,83 +1678,135 @@ export const Assistant: React.FC = () => {
                     className="mt-3 w-full bg-[#0a0a0a] border border-white/10 rounded-md px-3 py-2 text-xs text-neutral-200 outline-none focus:border-[#67E0A3]"
                     rows={2}
                   />
-                  <div className="grid grid-cols-2 gap-2 mt-3">
-                    <button
-                      onClick={() => saveReflectionFromPanel(reflection.id)}
-                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-                    >
-                      {reflection.savedAt ? 'Sync Bookmark' : 'Save Bookmark'}
-                    </button>
-                    <button
-                      onClick={() => loadReflectionTafsir(reflection.id)}
-                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-                    >
-                      Load Tafsir
-                    </button>
-                    <button
-                      onClick={() => loadReflectionAudio(reflection.id)}
-                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-                    >
-                      Load Recitation
-                    </button>
-                    <button
-                      onClick={() => saveReflectionNoteFromPanel(reflection.id)}
-                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-                    >
-                      Save Note
-                    </button>
+                  {collections.length > 0 && (
                     <select
                       aria-label={`Collection for ${reflection.verseKey}`}
                       defaultValue=""
                       onChange={(event) => {
                         if (event.target.value) void addReflectionToCollectionFromPanel(reflection.id, event.target.value);
                       }}
-                      className="bg-[#0a0a0a] border border-white/10 rounded-md px-2 py-1.5 text-xs text-neutral-300"
+                      className="mt-3 w-full bg-[#0a0a0a] border border-white/10 rounded-md px-2 py-2 text-xs text-neutral-300"
                     >
-                      <option value="">Save To Collection</option>
+                      <option value="">Save to collection…</option>
                       {collections.map((collection) => (
                         <option key={collection.id} value={collection.id}>{collection.name}</option>
                       ))}
                     </select>
+                  )}
+                  <div className="mt-3 flex w-full min-w-0 flex-nowrap items-center gap-2 overflow-x-auto">
+                    {!reflection.tafsir?.text?.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => loadReflectionTafsir(reflection.id)}
+                        className="shrink-0 px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
+                      >
+                        Load Tafsir
+                      </button>
+                    )}
                     <button
-                      onClick={createCollectionFromPanel}
-                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
+                      type="button"
+                      onClick={() => loadReflectionAudio(reflection.id)}
+                      className="shrink-0 px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
                     >
-                      Create Collection
+                      Load Recitation
                     </button>
                     <button
-                      onClick={() => setReflectionFeedbackFromPanel(reflection.id, 'relevant')}
-                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-                    >
-                      Relevant
-                    </button>
-                    <button
-                      onClick={() => setReflectionFeedbackFromPanel(reflection.id, 'not_relevant')}
-                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-                    >
-                      Not Relevant
-                    </button>
-                    <button
-                      onClick={() => showAlternateFromPanel(reflection.id)}
-                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-                    >
-                      Show Another Ayah
-                    </button>
-                    <button
-                      onClick={() => copyShareCardFromPanel(reflection.id)}
-                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-                    >
-                      Copy Share Card
-                    </button>
-                    <button
+                      type="button"
                       onClick={async () => {
+                        setReflectionActionsMenuId(null);
                         await window.ayati.deleteAyahReflection(reflection.id);
                         await refreshReflections();
                       }}
-                      className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-500 hover:text-neutral-300"
+                      className="shrink-0 px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-500 hover:text-neutral-300"
                     >
                       Delete
                     </button>
+                    <div className="relative shrink-0" data-reflection-actions-menu-root>
+                      <button
+                        type="button"
+                        aria-haspopup="menu"
+                        aria-expanded={reflectionActionsMenuId === reflection.id}
+                        aria-label="More reflection actions"
+                        onClick={() => setReflectionActionsMenuId((openId) => (openId === reflection.id ? null : reflection.id))}
+                        className="px-2 py-1.5 border border-white/10 rounded-md text-neutral-300 hover:border-[#67E0A3]/70 flex items-center justify-center"
+                      >
+                        <Icon icon="mdi:dots-horizontal" className="w-5 h-5" aria-hidden />
+                      </button>
+                      {reflectionActionsMenuId === reflection.id && (
+                        <div
+                          role="menu"
+                          className="absolute right-0 top-full z-30 mt-1 min-w-[12rem] py-1 rounded-md border border-white/10 bg-[#0a0a0a] shadow-lg"
+                        >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={reflection.syncState === 'synced'}
+                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5 disabled:opacity-40 disabled:pointer-events-none disabled:hover:bg-transparent"
+                            onClick={() => {
+                              void (async () => {
+                                await saveReflectionFromPanel(reflection.id);
+                                setReflectionActionsMenuId(null);
+                              })();
+                            }}
+                          >
+                            {getReflectionBookmarkButtonLabel(reflection)}
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={(noteDrafts[reflection.id] ?? reflection.note?.body ?? '').trim().length < 6}
+                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5 disabled:opacity-40 disabled:pointer-events-none disabled:hover:bg-transparent"
+                            onClick={() => {
+                              void (async () => {
+                                await saveReflectionNoteFromPanel(reflection.id);
+                                setReflectionActionsMenuId(null);
+                              })();
+                            }}
+                          >
+                            Save Note
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5"
+                            onClick={() => {
+                              void (async () => {
+                                await copyShareCardFromPanel(reflection.id);
+                                setReflectionActionsMenuId(null);
+                              })();
+                            }}
+                          >
+                            Copy Share Card
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5"
+                            onClick={() => {
+                              void (async () => {
+                                await setReflectionFeedbackFromPanel(reflection.id, 'relevant');
+                                setReflectionActionsMenuId(null);
+                              })();
+                            }}
+                          >
+                            Mark relevant
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5"
+                            onClick={() => {
+                              void (async () => {
+                                await setReflectionFeedbackFromPanel(reflection.id, 'not_relevant');
+                                setReflectionActionsMenuId(null);
+                              })();
+                            }}
+                          >
+                            Mark not relevant
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </article>
               ))}
@@ -1621,89 +1820,8 @@ export const Assistant: React.FC = () => {
 
       {/* CONTENT: Settings */}
       {activeTab === 'settings' && (
-        <div className="flex-1 flex flex-col overflow-y-auto p-5 space-y-6 scrollbar-hide">
-          {/* Group: App updates (first) */}
-          <div>
-            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              Updates
-            </h3>
-            <p className="text-xs text-neutral-500 mb-3">
-              Check for new releases and install updates for Ayati - Quran Desktop Companion.
-            </p>
-
-            <div className="border border-white/10 rounded-lg p-4 bg-white/[0.03]">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-neutral-200">{getUpdateStatusLabel(updateState)}</p>
-                  <p className="text-[11px] text-neutral-500 mt-1">
-                    Current version {updateState?.currentVersion ?? 'unknown'}
-                  </p>
-                </div>
-                <span
-                  className={`shrink-0 mt-1 w-2 h-2 rounded-full ${
-                    updateState?.status === 'available' || updateState?.status === 'downloaded'
-                      ? 'bg-[#67E0A3]'
-                      : updateState?.status === 'error'
-                        ? 'bg-red-400'
-                        : 'bg-neutral-600'
-                  }`}
-                  aria-hidden="true"
-                />
-              </div>
-
-              {typeof updateState?.downloadPercent === 'number' && updateState.status === 'downloading' && (
-                <div className="mt-4 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-[#67E0A3] transition-[width]"
-                    style={{ width: `${Math.max(0, Math.min(100, updateState.downloadPercent))}%` }}
-                  />
-                </div>
-              )}
-
-              {updateState?.message && (
-                <p className="text-xs leading-relaxed text-neutral-400 mt-3">{updateState.message}</p>
-              )}
-
-              {updateStatusMessage && (
-                <p className="text-xs leading-relaxed text-[#67E0A3] mt-3">{updateStatusMessage}</p>
-              )}
-
-              {updateState?.checkedAt && (
-                <p className="text-[11px] text-neutral-600 mt-3">
-                  Last checked {new Date(updateState.checkedAt).toLocaleString([], {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </p>
-              )}
-
-              {updateState?.runningUnderArm64Translation && (
-                <p className="text-xs leading-relaxed text-amber-300 mt-3">
-                  This Mac is running the Intel build under Rosetta. The next compatible update can move you to the native Apple Silicon build.
-                </p>
-              )}
-            </div>
-
-            <button
-              type="button"
-              onClick={handleUpdateAction}
-              disabled={isUpdateButtonDisabled(updateState)}
-              className="mt-3 w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-[#67E0A3] text-[#07120f] rounded-md text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Icon
-                icon={getUpdateAction(updateState) === 'install' ? 'solar:restart-linear' : 'solar:download-linear'}
-                className="text-base"
-              />
-              {getUpdateButtonLabel(updateState)}
-            </button>
-          </div>
-
-          <div className="pt-4 border-t border-white/5">
-            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              AI Provider
-            </h3>
+        <div className="flex-1 flex flex-col overflow-y-auto p-5 space-y-4 scrollbar-hide">
+          <SettingsSection title="AI Provider">
             <AiProviderSettingsFields
               idPrefix="assistant-ai-provider"
               provider={aiProvider}
@@ -1715,13 +1833,10 @@ export const Assistant: React.FC = () => {
               onModelChange={(value) => updateSetting('clawbot.model', value)}
               onApiKeyChange={(value) => updateSetting('clawbot.token', value)}
             />
-          </div>
+          </SettingsSection>
 
-          <div className="pt-4 border-t border-white/5">
-            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              Quran Reminders
-            </h3>
-            <div className="space-y-3">
+          <SettingsSection title="Quran Reminders">
+            <div className="space-y-4">
               <label className="flex items-center justify-between cursor-pointer group">
                 <div className="flex flex-col pr-4">
                   <span className="text-sm font-medium text-neutral-300">
@@ -1764,9 +1879,9 @@ export const Assistant: React.FC = () => {
                 </div>
               </label>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Timer Minutes</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Timer Minutes</span>
                   <input
                     type="number"
                     min={1}
@@ -1774,7 +1889,7 @@ export const Assistant: React.FC = () => {
                     list="timed-reminder-options"
                     value={ayahSettings?.timedReminderMinutes ?? 15}
                     onChange={(event) => updateAyahSetting('timedReminderMinutes', Number(event.target.value))}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   />
                   <datalist id="timed-reminder-options">
                     <option value="5" />
@@ -1788,25 +1903,25 @@ export const Assistant: React.FC = () => {
                   </span>
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Cooldown Minutes</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Cooldown Minutes</span>
                   <input
                     type="number"
                     min={1}
                     max={240}
                     value={ayahSettings?.nudgeCooldownMinutes ?? 15}
                     onChange={(event) => updateAyahSetting('nudgeCooldownMinutes', Number(event.target.value))}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   />
                 </label>
               </div>
               <label className="block">
-                <span className="block text-xs font-medium text-neutral-300 mb-1.5">Reminder Listen Reciter</span>
+                <span className="block text-xs font-medium text-neutral-300 mb-2">Reminder Listen Reciter</span>
                 <select
                   aria-label="Reminder Listen Reciter"
                   value={ayahSettings?.recitationId ?? ''}
                   onChange={(event) => updateReminderListenReciter(event.target.value)}
                   disabled={recitationResources.length === 0}
-                  className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all disabled:opacity-60"
+                  className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all disabled:opacity-60"
                 >
                   <option value="">
                     {recitationResources.length === 0 ? 'Loading reciters' : 'Choose reciter'}
@@ -1820,13 +1935,10 @@ export const Assistant: React.FC = () => {
                 </span>
               </label>
             </div>
-          </div>
+          </SettingsSection>
 
-          <div className="pt-4 border-t border-white/5">
-            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              Prayer Awareness
-            </h3>
-            <div className="space-y-3">
+          <SettingsSection title="Prayer Awareness">
+            <div className="space-y-4">
               <label className="flex items-center justify-between cursor-pointer group">
                 <div className="flex flex-col pr-4">
                   <span className="text-sm font-medium text-neutral-300">Enable Prayer Awareness</span>
@@ -1843,9 +1955,9 @@ export const Assistant: React.FC = () => {
                   <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
                 </div>
               </label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Country</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Country</span>
                   <select
                     value={currentPrayerDraft.country}
                     onChange={(event) => {
@@ -1853,7 +1965,7 @@ export const Assistant: React.FC = () => {
                       const firstCity = PRAYER_LOCATION_PRESETS.find((preset) => preset.country === country)?.cities[0] ?? '';
                       updatePrayerSettingsFromSettings({ country, city: firstCity });
                     }}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   >
                     <option value="">Select country</option>
                     {prayerCountryOptions.map((country) => (
@@ -1862,11 +1974,11 @@ export const Assistant: React.FC = () => {
                   </select>
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">City</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">City</span>
                   <select
                     value={currentPrayerDraft.city}
                     onChange={(event) => updatePrayerSettingsFromSettings({ city: event.target.value })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   >
                     <option value="">Select city</option>
                     {prayerCityOptions.map((city) => (
@@ -1875,22 +1987,22 @@ export const Assistant: React.FC = () => {
                   </select>
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Reminder Lead</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Reminder Lead</span>
                   <input
                     type="number"
                     min={0}
                     max={120}
                     value={prayerSettings?.reminderLeadMinutes ?? 10}
                     onChange={(event) => updatePrayerSettingsFromSettings({ reminderLeadMinutes: Number(event.target.value) })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   />
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Calculation</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Calculation</span>
                   <select
                     value={currentPrayerDraft.method}
                     onChange={(event) => updatePrayerSettingsFromSettings({ method: Number(event.target.value) })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   >
                     {PRAYER_CALCULATION_METHODS.map((method) => (
                       <option key={method.id} value={method.id}>{method.label}</option>
@@ -1900,12 +2012,9 @@ export const Assistant: React.FC = () => {
                 </label>
               </div>
             </div>
-          </div>
+          </SettingsSection>
 
-          <div className="pt-4 border-t border-white/5">
-            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              To Do
-            </h3>
+          <SettingsSection title="To Do">
             <label className="flex items-center justify-between cursor-pointer group">
               <div className="flex flex-col pr-4">
                 <span className="text-sm font-medium text-neutral-300">Pet Task Reminders</span>
@@ -1922,13 +2031,10 @@ export const Assistant: React.FC = () => {
                 <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
               </div>
             </label>
-          </div>
+          </SettingsSection>
 
-          <div className="pt-4 border-t border-white/5">
-            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              Focus
-            </h3>
-            <div className="space-y-3">
+          <SettingsSection title="Focus">
+            <div className="space-y-4">
               <label className="flex items-center justify-between cursor-pointer group">
                 <div className="flex flex-col pr-4">
                   <span className="text-sm font-medium text-neutral-300">Pet Focus Reminders</span>
@@ -1945,49 +2051,45 @@ export const Assistant: React.FC = () => {
                   <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
                 </div>
               </label>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-4">
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Focus</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Focus</span>
                   <input
                     type="number"
                     min={1}
                     max={240}
                     value={pomodoroState?.settings.focusMinutes ?? 25}
                     onChange={(event) => updatePomodoroSettingsFromPanel({ focusMinutes: Number(event.target.value) })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   />
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Short Break</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Short Break</span>
                   <input
                     type="number"
                     min={1}
                     max={120}
                     value={pomodoroState?.settings.shortBreakMinutes ?? 5}
                     onChange={(event) => updatePomodoroSettingsFromPanel({ shortBreakMinutes: Number(event.target.value) })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   />
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Long Break</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Long Break</span>
                   <input
                     type="number"
                     min={1}
                     max={120}
                     value={pomodoroState?.settings.longBreakMinutes ?? 15}
                     onChange={(event) => updatePomodoroSettingsFromPanel({ longBreakMinutes: Number(event.target.value) })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   />
                 </label>
               </div>
             </div>
-          </div>
+          </SettingsSection>
 
-          {/* Group 2: Watching */}
-          <div className="pt-4 border-t border-white/5">
-            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              Watching
-            </h3>
+          <SettingsSection title="Watching">
             <div className="space-y-4">
               <label className="flex items-center justify-between cursor-pointer group">
                 <span className="text-sm font-medium text-neutral-300">
@@ -2020,13 +2122,9 @@ export const Assistant: React.FC = () => {
                 </div>
               </label>
             </div>
-          </div>
+          </SettingsSection>
 
-          {/* Group 3: Companion Behavior */}
-          <div className="pt-4 border-t border-white/5">
-            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              Companion Behavior
-            </h3>
+          <SettingsSection title="Companion Behavior">
             <div className="space-y-4">
               <label className="flex items-center justify-between cursor-pointer group">
                 <div className="flex flex-col">
@@ -2068,16 +2166,16 @@ export const Assistant: React.FC = () => {
                   <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
                 </div>
               </label>
-              <div className="space-y-2 pt-1">
-                <div className="flex flex-col">
+              <div className="space-y-4 pt-2">
+                <div className="flex flex-col gap-0.5">
                   <span className="text-sm font-medium text-neutral-300">Companion appearance</span>
-                  <span className="text-[11px] text-neutral-500 mt-0.5">
+                  <span className="text-[11px] text-neutral-500">
                     Which pet appears on your desktop
                   </span>
                 </div>
                 <select
                   aria-label="Companion appearance"
-                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3]/40"
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3]/40"
                   value={(settings.pet as { appearanceId?: PetAppearanceId })?.appearanceId ?? 'ayah'}
                   onChange={(e) => {
                     void updateSetting('pet.appearanceId', e.target.value as PetAppearanceId);
@@ -2091,14 +2189,10 @@ export const Assistant: React.FC = () => {
                 </select>
               </div>
             </div>
-          </div>
+          </SettingsSection>
 
-          {/* Group 4: Keyboard Shortcuts */}
-          <div className="pt-4 border-t border-white/5">
-            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              Keyboard Shortcuts
-            </h3>
-            <div className="space-y-1 divide-y divide-white/5">
+          <SettingsSection title="Keyboard Shortcuts">
+            <div className="divide-y divide-white/5">
               <HotkeyInput
                 label="Open Chat"
                 description="Summon the quick chat bar"
@@ -2114,17 +2208,14 @@ export const Assistant: React.FC = () => {
               <HotkeyInput
                 label="Reflect on Screen"
                 description="Capture your screen and receive a fitting ayah"
-                value={(settings.hotkeys as { captureScreen?: string })?.captureScreen || 'CommandOrControl+Alt+/'}
+                value={(settings.hotkeys as { captureScreen?: string })?.captureScreen || 'CommandOrControl+Alt+/ '}
                 onChange={(value) => updateSetting('hotkeys.captureScreen', value)}
               />
             </div>
-          </div>
+          </SettingsSection>
 
-          <div className="pt-4 border-t border-white/5">
-            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              Quran Foundation
-            </h3>
-            <div className="space-y-3">
+          <SettingsSection title="Quran Foundation">
+            <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium text-neutral-300">
@@ -2172,30 +2263,87 @@ export const Assistant: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-4">
+                <div>
+                  <h4 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-1">
+                    Translation &amp; tafsir
+                  </h4>
+                  <p className="text-[10px] text-neutral-500 mb-3">
+                    Quran.com catalog. Applies to new captures and verse loads; existing reflection cards keep stored text until refreshed.
+                  </p>
+                  <div className="space-y-4">
+                    <label className="block">
+                      <span className="block text-xs font-medium text-neutral-300 mb-2">Translation language</span>
+                      <select
+                        aria-label="Filter translations by language"
+                        value={translationLanguageFilter}
+                        onChange={handleTranslationLanguageFilterChange}
+                        disabled={translationResources.length === 0}
+                        className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all disabled:opacity-50"
+                      >
+                        <option value="all">All languages</option>
+                        {translationCatalogLanguages.map((lang) => (
+                          <option key={lang} value={lang}>{lang}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="block text-xs font-medium text-neutral-300 mb-2">Translation</span>
+                      <select
+                        aria-label="Quran translation resource"
+                        value={
+                          translationsForSettingsPicker.some((t) => t.id === ayahSettings?.translationId)
+                            ? String(ayahSettings?.translationId ?? '')
+                            : String(translationsForSettingsPicker[0]?.id ?? '')
+                        }
+                        onChange={(event) => void updateAyahSetting('translationId', Number(event.target.value))}
+                        disabled={translationsForSettingsPicker.length === 0}
+                        className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all disabled:opacity-50"
+                      >
+                        {translationsForSettingsPicker.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}{t.languageName ? ` (${t.languageName})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="block text-xs font-medium text-neutral-300 mb-2">Tafsir edition</span>
+                      <select
+                        aria-label="Default tafsir resource"
+                        value={
+                          typeof ayahSettings?.tafsirResourceId === 'number'
+                            && tafsirResources.some((r) => r.id === ayahSettings.tafsirResourceId)
+                            ? String(ayahSettings.tafsirResourceId)
+                            : ''
+                        }
+                        onChange={(event) => void handleSettingsTafsirSelectChange(event)}
+                        disabled={tafsirResources.length === 0}
+                        className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all disabled:opacity-50"
+                      >
+                        <option value="">Auto (pick on first load)</option>
+                        {tafsirResources.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name}{r.languageName ? ` (${r.languageName})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Translation ID</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={ayahSettings?.translationId ?? 20}
-                    onChange={(event) => updateAyahSetting('translationId', Number(event.target.value))}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
-                  />
-                </label>
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">Mushaf ID</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">Mushaf ID</span>
                   <input
                     type="number"
                     min={1}
                     value={ayahSettings?.mushafId ?? 4}
                     onChange={(event) => updateAyahSetting('mushafId', Number(event.target.value))}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   />
                 </label>
               </div>
 
-              <div className="space-y-3 rounded-lg border border-white/10 bg-[#0a0a0a]/80 px-3 py-3">
+              <div className="space-y-4 rounded-lg border border-white/10 bg-[#0a0a0a]/80 px-4 py-4">
                 <label className="flex items-center justify-between gap-3 cursor-pointer">
                   <span className="text-xs font-medium text-neutral-300">QUL Arabic script</span>
                   <input
@@ -2206,11 +2354,11 @@ export const Assistant: React.FC = () => {
                   />
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-1.5">QUL mushaf track</span>
+                  <span className="block text-xs font-medium text-neutral-300 mb-2">QUL mushaf track</span>
                   <select
                     value={ayahSettings?.qulMushafKey === 'madaniTajweed' || ayahSettings?.qulMushafKey === 'madani1405' ? 'madani1421' : ayahSettings?.qulMushafKey ?? 'madani1421'}
                     onChange={(e) => updateAyahSetting('qulMushafKey', e.target.value)}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   >
                     {QUL_SCRIPT_OPTIONS.map((opt) => (
                       <option
@@ -2243,14 +2391,10 @@ export const Assistant: React.FC = () => {
               </p>
               {quranStatusMessage && <p className="text-[11px] text-[#67E0A3]">{quranStatusMessage}</p>}
             </div>
-          </div>
+          </SettingsSection>
 
-          {/* Group 5: Developer */}
-          <div className="pt-4 border-t border-white/5">
-            <h3 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-3">
-              Developer
-            </h3>
-            <div className="space-y-3">
+          <SettingsSection title="Developer">
+            <div className="space-y-4">
               {isDevEnvironment && (
                 <label className="flex items-center justify-between cursor-pointer group px-1">
                   <div className="flex flex-col">
@@ -2302,7 +2446,7 @@ export const Assistant: React.FC = () => {
                       Force companion state
                     </span>
                     <p className="text-[11px] text-neutral-500 mt-0.5">
-                      Instantly set Ayati - Quran Desktop Companion's current mood state
+                      Instantly set Ayati - Quran Desktop Companion&apos;s current mood state
                     </p>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
@@ -2418,9 +2562,10 @@ export const Assistant: React.FC = () => {
                 <span className="text-[10px] text-neutral-500">Restart required</span>
               </button>
             </div>
-          </div>
+          </SettingsSection>
         </div>
       )}
+
 
     </div>
   );

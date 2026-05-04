@@ -435,6 +435,36 @@ export class QuranFoundationClient {
       .filter((resource) => Number.isInteger(resource.id) && resource.id > 0 && resource.name);
   }
 
+  async fetchTranslationResources(accessToken: string | null): Promise<Array<{ id: number; name: string; languageName?: string }>> {
+    const response = await this.fetchImpl(this.getContentUrl('resources/translations').toString(), {
+      method: 'GET',
+      headers: this.getApiHeaders(accessToken),
+    });
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    const payload = await response.json() as {
+      translations?: Array<{
+        id?: number;
+        resource_id?: number;
+        name?: string;
+        author_name?: string;
+        language_name?: string;
+        translated_name?: { name?: string; language_name?: string };
+      }>;
+    };
+
+    return (payload.translations ?? [])
+      .map((resource) => ({
+        id: resource.id ?? resource.resource_id ?? 0,
+        name: resource.name ?? resource.author_name ?? resource.translated_name?.name ?? '',
+        languageName: resource.language_name ?? resource.translated_name?.language_name,
+      }))
+      .filter((resource) => Number.isInteger(resource.id) && resource.id > 0 && resource.name);
+  }
+
   async fetchRecitationResources(accessToken: string | null): Promise<Array<{ id: number; name: string }>> {
     const response = await this.fetchImpl(this.getContentUrl('resources/recitations').toString(), {
       method: 'GET',

@@ -227,6 +227,33 @@ describe('QuranFoundationClient', () => {
     expect(init?.headers).not.toHaveProperty('Authorization');
   });
 
+  it('fetches translation resource catalog from the content API', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        translations: [
+          { id: 131, name: 'Saheeh International', language_name: 'english' },
+          { id: 85, name: 'M. A. S. Abdel Haleem', language_name: 'english' },
+          { id: 12, name: 'Fooladvand - Hedayatfar', language_name: 'persian' },
+        ],
+      }), { status: 200 }),
+    );
+
+    const client = new QuranFoundationClient({
+      clientId: 'client-id',
+      redirectUri: 'ayati://oauth/callback',
+      fetchImpl: fetchMock,
+    });
+
+    await expect(client.fetchTranslationResources(null)).resolves.toEqual([
+      { id: 131, name: 'Saheeh International', languageName: 'english' },
+      { id: 85, name: 'M. A. S. Abdel Haleem', languageName: 'english' },
+      { id: 12, name: 'Fooladvand - Hedayatfar', languageName: 'persian' },
+    ]);
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/resources/translations');
+  });
+
   it('normalizes relative ayah audio URLs from the Content API', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

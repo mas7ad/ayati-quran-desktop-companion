@@ -204,7 +204,8 @@ const UPDATE_CHECK_CHANNEL = 'update-check';
 const UPDATE_DOWNLOAD_CHANNEL = 'update-download';
 const UPDATE_INSTALL_CHANNEL = 'update-install';
 const AUTO_UPDATE_STARTUP_DELAY_MS = 10_000;
-const AUTO_UPDATE_POLL_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/** Background check interval when auto-updates are enabled (electron-updater). */
+const AUTO_UPDATE_POLL_INTERVAL_MS = 60 * 60 * 1000;
 const REQUIRED_QURAN_DEMO_SCOPES = [
   'collection',
   'collection.create',
@@ -646,12 +647,19 @@ async function resolveRecitationResource(): Promise<{ id: number; name?: string 
   return { id: preferred.id, name: preferred.name };
 }
 
-async function getAyahTafsirById(reflectionId: string): Promise<AyahReflection | null> {
+async function getAyahTafsirById(reflectionId: string, resourceId?: number): Promise<AyahReflection | null> {
   const reflection = getAyahLensState().reflections.find((item) => item.id === reflectionId);
   if (!reflection) return null;
-  if (reflection.tafsir) return reflection;
 
-  const resource = await resolveTafsirResource();
+  const forcedResourceId = typeof resourceId === 'number' && Number.isInteger(resourceId) && resourceId > 0
+    ? resourceId
+    : undefined;
+
+  if (!forcedResourceId && reflection.tafsir) return reflection;
+
+  const resource = forcedResourceId
+    ? { id: forcedResourceId, name: undefined as string | undefined }
+    : await resolveTafsirResource();
   if (!resource) return reflection;
 
   const accessToken = await getQuranContentAccessToken();
@@ -4500,9 +4508,30 @@ function setupIPC() {
     return true;
   });
 
-  ipcMain.handle('ayah-tafsir', async (_event, reflectionId: string) => {
+  ipcMain.handle('ayah-tafsir', async (_event, reflectionId: unknown, resourceId?: unknown) => {
     if (typeof reflectionId !== 'string' || !reflectionId.trim()) return null;
-    return await getAyahTafsirById(reflectionId);
+    const rid = typeof resourceId === 'number' && Number.isInteger(resourceId) && resourceId > 0
+      ? resourceId
+      : undefined;
+    return await getAyahTafsirById(reflectionId, rid);
+  });
+
+  ipcMain.handle('ayah-tafsir-resources', async () => {
+    try {
+      const accessToken = await getQuranContentAccessToken();
+      return await getQuranClient().fetchTafsirResources(accessToken);
+    } catch {
+      return [];
+    }
+  });
+
+  ipcMain.handle('ayah-translation-resources', async () => {
+    try {
+      const accessToken = await getQuranContentAccessToken();
+      return await getQuranClient().fetchTranslationResources(accessToken);
+    } catch {
+      return [];
+    }
   });
 
   ipcMain.handle('ayah-audio', async (_event, reflectionId: string) => {

@@ -31,11 +31,11 @@ export function AiProviderSettingsFields({
 }: AiProviderSettingsFieldsProps) {
   const providerConfig = getAiProviderConfig(provider);
 
-  const inputClasses = "w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all font-mono placeholder:text-white/40";
-  const labelClasses = "block text-xs font-bold text-white/70 uppercase tracking-wider mb-1.5";
+  const inputClasses = "w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 min-h-[2.75rem] text-sm text-white leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all font-mono placeholder:text-white/40";
+  const labelClasses = "block text-xs font-bold text-white/70 uppercase tracking-wider mb-2";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div>
         <label htmlFor={`${idPrefix}-provider`} className={labelClasses}>
           Provider
@@ -45,7 +45,7 @@ export function AiProviderSettingsFields({
           name="provider"
           value={provider}
           onChange={(event) => onProviderChange(event.target.value as ClawBotProvider)}
-          className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all cursor-pointer backdrop-blur-md"
+          className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 min-h-[2.75rem] text-sm text-white leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all cursor-pointer backdrop-blur-md"
         >
           {AI_PROVIDER_CONFIGS.map((providerOption) => (
             <option key={providerOption.id} value={providerOption.id} className="bg-[#1a2a24] text-white">

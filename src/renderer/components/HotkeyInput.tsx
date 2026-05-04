@@ -101,17 +101,17 @@ export const HotkeyInput: React.FC<HotkeyInputProps> = ({
   };
 
   return (
-    <div className="flex items-center justify-between py-3">
-      <div>
+    <div className="flex items-center justify-between gap-5 py-3.5">
+      <div className="min-w-0 pr-2">
         <div className={`text-sm font-medium ${labelClassName}`}>{label}</div>
-        <div className={`text-xs mt-0.5 ${descriptionClassName}`}>{description}</div>
+        <div className={`text-xs mt-1 leading-snug ${descriptionClassName}`}>{description}</div>
       </div>
       <button
         aria-label={`Change ${label} shortcut, currently ${formattedHotkey}`}
         onKeyDown={handleKeyDown}
         onClick={startCapture}
         onBlur={stopCapture}
-        className={`px-3 py-2 rounded-lg text-sm font-mono transition-colors min-w-[140px] text-center ${buttonClassName}`}
+        className={`shrink-0 px-3.5 py-2.5 rounded-lg text-sm font-mono transition-colors min-w-[148px] text-center ${buttonClassName}`}
       >
         {isRecording ? 'Press keys…' : formattedHotkey}
       </button>

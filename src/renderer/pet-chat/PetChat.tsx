@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
 import { MarkdownMessage } from '../components/MarkdownMessage';
 import { QulArabicText } from '../components/QulArabicText';
+import { getTafsirParagraphs } from '../screenshot-question/AyahVerseCard';
 
 const MIN_REFLECTION_NOTE_CHARS = 6;
 
@@ -18,7 +19,7 @@ const DEFAULT_QUICK_REPLIES = ['Thanks!', 'Tell me more', 'Not now'];
 
 interface PetChatTafsir {
   resourceName: string;
-  paragraphs: string[];
+  text: string;
 }
 
 function pausePetChatAudio(audio: HTMLAudioElement | null): void {
@@ -28,27 +29,6 @@ function pausePetChatAudio(audio: HTMLAudioElement | null): void {
   } catch {
     // JSDOM does not implement media pause in some environments.
   }
-}
-
-function formatTafsirParagraphs(text: string): string[] {
-  const explicitParagraphs = text
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-
-  if (explicitParagraphs.length > 1) return explicitParagraphs;
-
-  const sentences = (text.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) ?? [text])
-    .map((sentence) => sentence.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-
-  if (sentences.length <= 2) return sentences;
-
-  const paragraphs: string[] = [];
-  for (let index = 0; index < sentences.length; index += 2) {
-    paragraphs.push(sentences.slice(index, index + 2).join(' '));
-  }
-  return paragraphs;
 }
 
 export const PetChat: React.FC = () => {
@@ -292,7 +272,7 @@ export const PetChat: React.FC = () => {
 
         setTafsir({
           resourceName: updated.tafsir.resourceName,
-          paragraphs: formatTafsirParagraphs(updated.tafsir.text),
+          text: updated.tafsir.text,
         });
         window.ayati.petChatReply('curious');
       } catch {
@@ -456,11 +436,25 @@ export const PetChat: React.FC = () => {
                     <p className="pet-chat-translation">{message.footerText}</p>
                   ) : null}
                   {tafsir ? (
-                    <section className="pet-chat-tafsir" aria-label="Tafsir">
-                      <p className="pet-chat-tafsir-title">{tafsir.resourceName}</p>
-                      <div className="pet-chat-tafsir-body">
-                        {tafsir.paragraphs.map((paragraph) => (
-                          <p key={paragraph}>{paragraph}</p>
+                    <section
+                      className="mt-3 max-h-[178px] overflow-y-auto border-l border-[#67E0A3]/40 pl-3 pr-1"
+                      aria-label="Tafsir"
+                    >
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mb-2">
+                        <span className="text-[11px] font-medium text-[#AFF9C9]">Tafsir</span>
+                        {tafsir.resourceName ? (
+                          <span className="text-[10px] text-neutral-500">{tafsir.resourceName}</span>
+                        ) : null}
+                      </div>
+                      <div className="space-y-2.5">
+                        {getTafsirParagraphs(tafsir.text).map((paragraph, index) => (
+                          <p
+                            key={`pet-tafsir-${index}`}
+                            className="text-xs leading-relaxed text-neutral-400"
+                            translate="no"
+                          >
+                            {paragraph}
+                          </p>
                         ))}
                       </div>
                     </section>

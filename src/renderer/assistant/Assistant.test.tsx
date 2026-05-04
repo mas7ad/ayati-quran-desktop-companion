@@ -29,6 +29,14 @@ function createMockAyati() {
       { id: 4, name: 'Abu Bakr Shatri' },
       { id: 1, name: 'Abdul Baset' },
     ]),
+    getAyahTafsirResources: vi.fn().mockResolvedValue([
+      { id: 169, name: 'Tafsir Ibn Kathir', languageName: 'english' },
+      { id: 171, name: 'Tafhim-ul-Quran', languageName: 'english' },
+    ]),
+    getAyahTranslationResources: vi.fn().mockResolvedValue([
+      { id: 131, name: 'Saheeh International', languageName: 'english' },
+      { id: 20, name: 'Dr. Mustafa Khattab', languageName: 'english' },
+    ]),
     getQuranAuthStatus: vi.fn().mockResolvedValue({ isConnected: false, scopes: [] }),
     getAyahReflectionHistory: vi.fn().mockResolvedValue([]),
     getChatHistory: vi.fn().mockResolvedValue([]),
@@ -277,8 +285,46 @@ describe('Assistant updates in settings', () => {
     expect(ayati.updateSettings).toHaveBeenCalledWith('pet.appearanceId', 'cosmo');
   });
 
-  it('shows update controls at the top of settings and checks for updates through the desktop listener bridge', async () => {
+  it('shows title bar update action when an update is available and downloads on click', async () => {
+    let notifyUpdateState: ((state: {
+      enabled: boolean;
+      status: string;
+      currentVersion: string;
+      hostArch: string;
+      appArch: string;
+      runningUnderArm64Translation: boolean;
+      availableVersion: string | null;
+      downloadedVersion: string | null;
+      downloadPercent: number | null;
+      checkedAt: string | null;
+      message: string | null;
+      errorContext: string | null;
+      canRetry: boolean;
+    }) => void) | undefined;
+
     const ayati = createMockAyati();
+    ayati.onUpdateState = vi.fn((cb) => {
+      notifyUpdateState = cb as NonNullable<typeof notifyUpdateState>;
+    });
+    ayati.downloadUpdate = vi.fn().mockResolvedValue({
+      accepted: true,
+      completed: true,
+      state: {
+        enabled: true,
+        status: 'downloaded',
+        currentVersion: '0.0.1',
+        hostArch: 'arm64',
+        appArch: 'arm64',
+        runningUnderArm64Translation: false,
+        availableVersion: '0.1.0',
+        downloadedVersion: '0.1.0',
+        downloadPercent: null,
+        checkedAt: '2026-04-20T10:00:00.000Z',
+        message: null,
+        errorContext: null,
+        canRetry: false,
+      },
+    });
     Object.defineProperty(window, 'ayati', {
       configurable: true,
       value: ayati as Window['ayati'],
@@ -293,15 +339,33 @@ describe('Assistant updates in settings', () => {
       expect(ayati.onUpdateState).toHaveBeenCalled();
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
-    expect(await screen.findByText('Ready to check')).toBeInTheDocument();
+    await act(async () => {
+      notifyUpdateState?.({
+        enabled: true,
+        status: 'available',
+        currentVersion: '0.0.1',
+        hostArch: 'arm64',
+        appArch: 'arm64',
+        runningUnderArm64Translation: false,
+        availableVersion: '0.1.0',
+        downloadedVersion: null,
+        downloadPercent: null,
+        checkedAt: '2026-04-20T10:00:00.000Z',
+        message: null,
+        errorContext: null,
+        canRetry: false,
+      });
+    });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Check for Updates' }));
-    expect((await screen.findAllByText('Up to date')).length).toBeGreaterThan(0);
+    const updateButton = await screen.findByRole('button', { name: 'Download Update' });
+    await userEvent.click(updateButton);
 
     await waitFor(() => {
-      expect(ayati.checkForUpdate).toHaveBeenCalled();
+      expect(ayati.downloadUpdate).toHaveBeenCalled();
     });
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    expect(screen.queryByText('Check for new releases and install updates')).not.toBeInTheDocument();
   });
 });
 

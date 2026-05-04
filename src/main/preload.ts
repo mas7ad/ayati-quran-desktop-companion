@@ -91,7 +91,10 @@ contextBridge.exposeInMainWorld('ayati', {
   saveAyahReflection: (reflectionId: string) => ipcRenderer.invoke('ayah-save-reflection', reflectionId),
   getAyahReflectionHistory: () => ipcRenderer.invoke('ayah-history'),
   deleteAyahReflection: (reflectionId: string) => ipcRenderer.invoke('ayah-delete-reflection', reflectionId),
-  getAyahTafsir: (reflectionId: string) => ipcRenderer.invoke('ayah-tafsir', reflectionId),
+  getAyahTafsir: (reflectionId: string, resourceId?: number) =>
+    ipcRenderer.invoke('ayah-tafsir', reflectionId, resourceId),
+  getAyahTafsirResources: () => ipcRenderer.invoke('ayah-tafsir-resources'),
+  getAyahTranslationResources: () => ipcRenderer.invoke('ayah-translation-resources'),
   getAyahAudio: (reflectionId: string) => ipcRenderer.invoke('ayah-audio', reflectionId),
   saveAyahReflectionNote: (reflectionId: string, body: string) => ipcRenderer.invoke('ayah-save-note', reflectionId, body),
   getAyahCollections: () => ipcRenderer.invoke('ayah-collections'),
@@ -727,7 +730,9 @@ export interface AyatiAPI {
   saveAyahReflection: (reflectionId: string) => Promise<AyahReflection | null>;
   getAyahReflectionHistory: () => Promise<AyahReflection[]>;
   deleteAyahReflection: (reflectionId: string) => Promise<boolean>;
-  getAyahTafsir: (reflectionId: string) => Promise<AyahReflection | null>;
+  getAyahTafsir: (reflectionId: string, resourceId?: number) => Promise<AyahReflection | null>;
+  getAyahTafsirResources: () => Promise<Array<{ id: number; name: string; languageName?: string }>>;
+  getAyahTranslationResources: () => Promise<Array<{ id: number; name: string; languageName?: string }>>;
   getAyahAudio: (reflectionId: string) => Promise<AyahReflection | null>;
   saveAyahReflectionNote: (reflectionId: string, body: string) => Promise<AyahReflection | null>;
   getAyahCollections: () => Promise<AyahCollection[]>;
