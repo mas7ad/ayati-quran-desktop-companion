@@ -24,4 +24,30 @@ describe('getWindowPositionNearAnchor', () => {
 
     expect(position).toEqual({ x: 1532, y: 0 });
   });
+
+  it('moves beside avoid bounds when the preferred top-clamped position would overlap', () => {
+    const position = getWindowPositionNearAnchor({
+      anchor: { x: 900, y: 120, width: 164, height: 164 },
+      windowSize: { width: 400, height: 500 },
+      workArea: { x: 0, y: 0, width: 1440, height: 900 },
+      verticalGap: -3,
+      avoidBounds: { x: 772, y: 0, width: 420, height: 520 },
+      avoidGap: 12,
+    });
+
+    expect(position).toEqual({ x: 360, y: 0 });
+  });
+
+  it('moves above avoid bounds when there is vertical room', () => {
+    const position = getWindowPositionNearAnchor({
+      anchor: { x: 900, y: 700, width: 164, height: 164 },
+      windowSize: { width: 400, height: 240 },
+      workArea: { x: 0, y: 0, width: 1440, height: 900 },
+      verticalGap: -3,
+      avoidBounds: { x: 772, y: 500, width: 420, height: 220 },
+      avoidGap: 12,
+    });
+
+    expect(position).toEqual({ x: 782, y: 248 });
+  });
 });

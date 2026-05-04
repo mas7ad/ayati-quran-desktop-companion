@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
 import { MarkdownMessage } from '../components/MarkdownMessage';
+import { QulArabicText } from '../components/QulArabicText';
 
 const MIN_REFLECTION_NOTE_CHARS = 6;
 
@@ -8,34 +9,88 @@ interface ChatMessage {
   text: string;
   quickReplies?: string[];
   reflectionId?: string;
+  verseKey?: string;
   arabicText?: string;
   footerText?: string;
 }
 
 const DEFAULT_QUICK_REPLIES = ['Thanks!', 'Tell me more', 'Not now'];
 
+interface PetChatTafsir {
+  resourceName: string;
+  paragraphs: string[];
+}
+
+function pausePetChatAudio(audio: HTMLAudioElement | null): void {
+  if (!audio) return;
+  try {
+    audio.pause();
+  } catch {
+    // JSDOM does not implement media pause in some environments.
+  }
+}
+
+function formatTafsirParagraphs(text: string): string[] {
+  const explicitParagraphs = text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  if (explicitParagraphs.length > 1) return explicitParagraphs;
+
+  const sentences = (text.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) ?? [text])
+    .map((sentence) => sentence.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  if (sentences.length <= 2) return sentences;
+
+  const paragraphs: string[] = [];
+  for (let index = 0; index < sentences.length; index += 2) {
+    paragraphs.push(sentences.slice(index, index + 2).join(' '));
+  }
+  return paragraphs;
+}
+
 export const PetChat: React.FC = () => {
   const [message, setMessage] = useState<ChatMessage | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingQuickReply, setLoadingQuickReply] = useState<string | null>(null);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const [tafsir, setTafsir] = useState<PetChatTafsir | null>(null);
   const [isReflectNoteOpen, setIsReflectNoteOpen] = useState(false);
   const [reflectNoteDraft, setReflectNoteDraft] = useState('');
   const [reflectNoteError, setReflectNoteError] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const lastSizeRef = useRef<{ width: number; height: number } | null>(null);
   const lastInteractionSentAtRef = useRef(0);
+  const petChatAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     window.ayati.onPetChatMessage((msg) => {
       lastSizeRef.current = null;
+      pausePetChatAudio(petChatAudioRef.current);
+      petChatAudioRef.current = null;
+      setIsAudioPlaying(false);
+      window.ayati.setPetChatAudioPlaying(false);
       setMessage({
         ...msg,
         quickReplies: msg.quickReplies || DEFAULT_QUICK_REPLIES,
       });
       setIsLoading(false);
+      setLoadingQuickReply(null);
+      setTafsir(null);
       setIsReflectNoteOpen(false);
       setReflectNoteDraft('');
       setReflectNoteError(null);
     });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      pausePetChatAudio(petChatAudioRef.current);
+      petChatAudioRef.current = null;
+      window.ayati.setPetChatAudioPlaying(false);
+    };
   }, []);
 
   const reportContentSize = useCallback(() => {
@@ -68,7 +123,7 @@ export const PetChat: React.FC = () => {
       cancelAnimationFrame(frame1);
       if (frame2) cancelAnimationFrame(frame2);
     };
-  }, [message, isLoading, isReflectNoteOpen, reflectNoteDraft, reportContentSize]);
+  }, [message, isLoading, loadingQuickReply, isAudioPlaying, tafsir, isReflectNoteOpen, reflectNoteDraft, reportContentSize]);
 
   useEffect(() => {
     if (!message || !contentRef.current) return;
@@ -133,8 +188,128 @@ export const PetChat: React.FC = () => {
   const handleQuickReply = useCallback(async (reply: string) => {
     if (!message) return;
 
-    if (reply === 'Not now') {
+    if (reply === 'Dismiss' || reply === 'Not now') {
       window.ayati.petChatReply('dismiss');
+      window.ayati.hidePetChat();
+      return;
+    }
+
+    if (reply === 'Pause') {
+      pausePetChatAudio(petChatAudioRef.current);
+      setIsAudioPlaying(false);
+      window.ayati.setPetChatAudioPlaying(false);
+      window.ayati.petChatReply('curious');
+      return;
+    }
+
+    if (reply === 'Listen') {
+      if (!message.reflectionId) {
+        setMessage({
+          id: crypto.randomUUID(),
+          text: 'Recitation is unavailable for this message.',
+          quickReplies: ['Got it', 'Dismiss'],
+        });
+        return;
+      }
+
+      setLoadingQuickReply('Listen');
+      window.ayati.petChatReply('thinking');
+      try {
+        const updated = await window.ayati.getAyahAudio(message.reflectionId);
+        const url = updated?.audio?.url;
+        if (!url) {
+          setMessage({
+            id: crypto.randomUUID(),
+            text: 'Could not load recitation. Try again from Reflections after checking your connection.',
+            quickReplies: ['Got it', 'Dismiss'],
+          });
+          window.ayati.petChatReply('curious');
+          return;
+        }
+
+        pausePetChatAudio(petChatAudioRef.current);
+        const audio = new Audio(url);
+        petChatAudioRef.current = audio;
+        audio.addEventListener('ended', () => {
+          setIsAudioPlaying(false);
+          window.ayati.setPetChatAudioPlaying(false);
+          window.ayati.petChatReply('happy');
+        });
+        audio.addEventListener('pause', () => {
+          setIsAudioPlaying(false);
+          window.ayati.setPetChatAudioPlaying(false);
+        });
+        try {
+          await audio.play();
+          setIsAudioPlaying(true);
+          window.ayati.setPetChatAudioPlaying(true);
+          window.ayati.petChatReply('curious');
+        } catch {
+          window.ayati.setPetChatAudioPlaying(false);
+          setMessage({
+            id: crypto.randomUUID(),
+            text: 'Could not start playback. Check system audio and try again.',
+            quickReplies: ['Got it', 'Dismiss'],
+          });
+          window.ayati.petChatReply('curious');
+        }
+      } catch {
+        setMessage({
+          id: crypto.randomUUID(),
+          text: 'Could not load recitation. Try again from Reflections.',
+          quickReplies: ['Got it', 'Dismiss'],
+        });
+        window.ayati.petChatReply('curious');
+      } finally {
+        setLoadingQuickReply(null);
+      }
+      return;
+    }
+
+    if (reply === 'Tafsir') {
+      if (!message.reflectionId) {
+        setMessage({
+          id: crypto.randomUUID(),
+          text: 'Tafsir is unavailable for this message.',
+          quickReplies: ['Got it', 'Dismiss'],
+        });
+        return;
+      }
+
+      setLoadingQuickReply('Tafsir');
+      window.ayati.petChatReply('thinking');
+      try {
+        const updated = await window.ayati.getAyahTafsir(message.reflectionId);
+        if (!updated?.tafsir?.text) {
+          setMessage({
+            id: crypto.randomUUID(),
+            text: 'Could not load tafsir. Try again from Reflections.',
+            quickReplies: ['Got it', 'Dismiss'],
+          });
+          window.ayati.petChatReply('curious');
+          return;
+        }
+
+        setTafsir({
+          resourceName: updated.tafsir.resourceName,
+          paragraphs: formatTafsirParagraphs(updated.tafsir.text),
+        });
+        window.ayati.petChatReply('curious');
+      } catch {
+        setMessage({
+          id: crypto.randomUUID(),
+          text: 'Could not load tafsir. Try again from Reflections.',
+          quickReplies: ['Got it', 'Dismiss'],
+        });
+        window.ayati.petChatReply('curious');
+      } finally {
+        setLoadingQuickReply(null);
+      }
+      return;
+    }
+
+    if (reply === 'Start Break' || reply === 'Start Focus' || reply === 'Open Focus') {
+      window.ayati.petChatReply(reply);
       window.ayati.hidePetChat();
       return;
     }
@@ -235,7 +410,7 @@ export const PetChat: React.FC = () => {
 
   if (!message) return null;
 
-  const scrollMaxClass = isReflectNoteOpen || message.arabicText ? 'max-h-[280px]' : 'max-h-[150px]';
+  const scrollMaxClass = isReflectNoteOpen || tafsir || message.arabicText ? 'max-h-[280px]' : 'max-h-[150px]';
 
   return (
     <div className="w-full h-full flex items-end justify-center">
@@ -243,7 +418,7 @@ export const PetChat: React.FC = () => {
         <div
           role="group"
           aria-label="Pet speech bubble"
-          className="pet-speech-bubble min-w-[180px] max-w-[300px] w-max animate-speech-bubble-in"
+          className="pet-speech-bubble min-w-[260px] max-w-[380px] w-max animate-speech-bubble-in"
           onMouseEnter={notifyInteraction}
           onMouseMove={notifyInteraction}
           onMouseDown={notifyInteraction}
@@ -251,7 +426,7 @@ export const PetChat: React.FC = () => {
           onWheel={notifyInteraction}
         >
           <div className="pet-speech-bubble-panel">
-            <div className={`p-3 overflow-y-auto ${scrollMaxClass}`}>
+            <div className={`pet-chat-content px-4 pt-4 pb-3 overflow-y-auto ${scrollMaxClass}`}>
               {isLoading ? (
                 <div className="flex gap-1 justify-center py-2">
                   <span className="w-2 h-2 rounded-full bg-[#67E0A3] loading-dot"></span>
@@ -264,12 +439,31 @@ export const PetChat: React.FC = () => {
                     <MarkdownMessage content={message.text} />
                   </div>
                   {message.arabicText ? (
-                    <p className="pet-chat-arabic" dir="rtl" lang="ar" translate="no">
-                      {message.arabicText}
-                    </p>
+                    message.verseKey ? (
+                      <QulArabicText
+                        verseKey={message.verseKey}
+                        fallbackText={message.arabicText}
+                        className="pet-chat-arabic"
+                        variant="petChat"
+                      />
+                    ) : (
+                      <p className="pet-chat-arabic" dir="rtl" lang="ar" translate="no">
+                        {message.arabicText}
+                      </p>
+                    )
                   ) : null}
                   {message.footerText ? (
                     <p className="pet-chat-translation">{message.footerText}</p>
+                  ) : null}
+                  {tafsir ? (
+                    <section className="pet-chat-tafsir" aria-label="Tafsir">
+                      <p className="pet-chat-tafsir-title">{tafsir.resourceName}</p>
+                      <div className="pet-chat-tafsir-body">
+                        {tafsir.paragraphs.map((paragraph) => (
+                          <p key={paragraph}>{paragraph}</p>
+                        ))}
+                      </div>
+                    </section>
                   ) : null}
                   {isReflectNoteOpen && message.reflectionId ? (
                     <div className="mt-3">
@@ -302,21 +496,33 @@ export const PetChat: React.FC = () => {
             </div>
 
             {!isLoading && !isReflectNoteOpen && message.quickReplies && (
-              <div className="flex gap-2 px-3 pb-2 pt-2 flex-wrap justify-center border-t border-white/5">
-                {message.quickReplies.map((reply) => (
-                  <button
-                    key={reply}
-                    type="button"
-                    onClick={() => handleQuickReply(reply)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67E0A3]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f0f] ${
-                      reply === 'Not now'
-                        ? 'bg-white/5 border border-white/10 text-neutral-400 hover:bg-white/10 hover:text-neutral-300'
-                        : 'bg-[#67E0A3]/10 border border-[#67E0A3]/20 text-[#67E0A3] hover:bg-[#67E0A3]/20 hover:border-[#67E0A3]/40'
-                    }`}
-                  >
-                    {reply}
-                  </button>
-                ))}
+              <div className="flex gap-1.5 px-2 pb-2 pt-2 flex-nowrap justify-center border-t border-white/5">
+                {message.quickReplies.map((reply) => {
+                  const label = reply === 'Listen' && isAudioPlaying ? 'Pause' : reply;
+                  const isButtonLoading = loadingQuickReply === reply;
+                  return (
+                    <button
+                      key={reply}
+                      type="button"
+                      aria-label={isButtonLoading ? `Loading ${reply}` : undefined}
+                      aria-busy={isButtonLoading}
+                      disabled={loadingQuickReply !== null}
+                      onClick={() => handleQuickReply(label)}
+                      className={`whitespace-nowrap px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67E0A3]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f0f] disabled:cursor-default disabled:opacity-75 ${
+                        label === 'Dismiss' || label === 'Not now'
+                          ? 'bg-white/5 border border-white/10 text-neutral-400 hover:bg-white/10 hover:text-neutral-300'
+                          : 'bg-[#67E0A3]/10 border border-[#67E0A3]/20 text-[#67E0A3] hover:bg-[#67E0A3]/20 hover:border-[#67E0A3]/40'
+                      }`}
+                    >
+                      {isButtonLoading ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-current loading-dot" aria-hidden="true" />
+                          <span>{label}</span>
+                        </span>
+                      ) : label}
+                    </button>
+                  );
+                })}
               </div>
             )}
 
@@ -325,14 +531,14 @@ export const PetChat: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => void saveReflectionNote()}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67E0A3]/60 bg-[#67E0A3]/10 border border-[#67E0A3]/20 text-[#67E0A3] hover:bg-[#67E0A3]/20"
+                  className="px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67E0A3]/60 bg-[#67E0A3]/10 border border-[#67E0A3]/20 text-[#67E0A3] hover:bg-[#67E0A3]/20"
                 >
                   Save reflection
                 </button>
                 <button
                   type="button"
                   onClick={cancelReflectionNote}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 bg-white/5 border border-white/10 text-neutral-400 hover:bg-white/10"
+                  className="px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 bg-white/5 border border-white/10 text-neutral-400 hover:bg-white/10"
                 >
                   Cancel
                 </button>

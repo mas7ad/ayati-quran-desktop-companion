@@ -149,18 +149,127 @@ interface QuranAuthStatus {
 interface AyahLensSettings {
   translationId: number;
   mushafId: number;
+  qulArabicEnabled?: boolean;
+  qulMushafKey?: string;
+  qulTajweedEnabled?: boolean;
   captureMode: 'fullScreen';
   saveScreenshots: false;
   defaultSave: boolean;
   contextualNudges: boolean;
   nudgeCooldownMinutes: number;
-  maxNudgesPerDay: number;
   timedReminders: boolean;
   timedReminderMinutes: number;
   tafsirResourceId: number | null;
   tafsirResourceName: string | null;
   recitationId: number | null;
   reciterName: string | null;
+}
+
+interface QuranRecitationResource {
+  id: number;
+  name: string;
+}
+
+interface QulRenderedVersePayload {
+  surahId: number;
+  ayahNumber: number;
+  displayText: string;
+  markupText: string | null;
+  rendererKind: 'pageGlyph' | 'unicodeFont';
+  pageNumber: number | null;
+  fontPostScriptName: string;
+  fontAbsolutePath: string;
+}
+
+type PrayerName = 'fajr' | 'sunrise' | 'dhuhr' | 'asr' | 'maghrib' | 'isha';
+interface PrayerTimeEntry {
+  name: PrayerName;
+  label: string;
+  time: string;
+  at: number;
+  isReminderEnabled: boolean;
+}
+interface PrayerSettings {
+  enabled: boolean;
+  city: string;
+  country: string;
+  method: number;
+  school: 0 | 1;
+  reminderLeadMinutes: number;
+  quietMinutesAfterPrayer: number;
+  hasSavedSettings: boolean;
+}
+interface PrayerDay {
+  date: string;
+  city: string;
+  country: string;
+  method: number;
+  school: 0 | 1;
+  timezone: string;
+  source: 'aladhan';
+  fetchedAt: number;
+  prayers: PrayerTimeEntry[];
+  error?: string;
+}
+interface PrayerTimesBundle {
+  today: PrayerDay | null;
+  tomorrow: PrayerDay | null;
+}
+type TodoPriority = 'none' | 'low' | 'medium' | 'high';
+interface TodoSettings {
+  petRemindersEnabled: boolean;
+}
+interface TodoItem {
+  id: string;
+  title: string;
+  notes: string;
+  priority: TodoPriority;
+  createdAt: number;
+  updatedAt: number;
+  dueAt: number | null;
+  reminderAt: number | null;
+  completedAt: number | null;
+}
+type CreateTodoInput = Pick<TodoItem, 'title'> & Partial<Pick<TodoItem, 'notes' | 'priority' | 'dueAt' | 'reminderAt'>>;
+type UpdateTodoInput = Partial<Pick<TodoItem, 'title' | 'notes' | 'priority' | 'dueAt' | 'reminderAt'>>;
+type PomodoroSessionKind = 'focus' | 'shortBreak' | 'longBreak';
+interface PomodoroSettings {
+  focusMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  sessionsUntilLongBreak: number;
+  petRemindersEnabled: boolean;
+}
+interface PomodoroActiveSession {
+  id: string;
+  kind: PomodoroSessionKind;
+  status: 'running' | 'paused' | 'completed' | 'cancelled';
+  startedAt: number;
+  pausedAt: number | null;
+  accumulatedPausedMs: number;
+  durationMinutes: number;
+  todoId: string | null;
+  completedAt: number | null;
+}
+interface PomodoroState {
+  settings: PomodoroSettings;
+  activeSession: PomodoroActiveSession | null;
+  completedFocusCount: number;
+  history: Array<{
+    id: string;
+    kind: PomodoroSessionKind;
+    startedAt: number;
+    completedAt: number;
+    durationMinutes: number;
+    todoId: string | null;
+  }>;
+  sentCompletionIds: string[];
+  remainingMs?: number | null;
+}
+interface StartPomodoroInput {
+  kind: PomodoroSessionKind;
+  durationMinutes?: number;
+  todoId?: string | null;
 }
 
 interface OnboardingData {
@@ -263,6 +372,8 @@ interface AyatiAPI {
   forcePetSleep: () => void;
   forceActiveAppComment: () => Promise<boolean>;
   forceTimedReminderComment: () => Promise<boolean>;
+  forcePrayerReminderComment: () => Promise<boolean>;
+  forceTodoReminderComment: () => Promise<boolean>;
   toggleChatbar: () => void;
   closeChatbar: () => void;
   setChatbarIgnoreMouse: (ignore: boolean) => void;
@@ -274,17 +385,20 @@ interface AyatiAPI {
     text: string;
     quickReplies?: string[];
     reflectionId?: string;
+    verseKey?: string;
     arabicText?: string;
     footerText?: string;
   }) => void;
   hidePetChat: () => void;
   resizePetChat: (width: number, height: number) => void;
   petChatInteracted: () => void;
+  setPetChatAudioPlaying: (isPlaying: boolean) => void;
   onPetChatMessage: (callback: (message: {
     id: string;
     text: string;
     quickReplies?: string[];
     reflectionId?: string;
+    verseKey?: string;
     arabicText?: string;
     footerText?: string;
   }) => void) => void;
@@ -327,7 +441,41 @@ interface AyatiAPI {
   getQuranStreakSummary: () => Promise<QuranStreakSummary>;
   copyReflectionShareCard: (reflectionId: string) => Promise<boolean>;
   getAyahLensSettings: () => Promise<AyahLensSettings>;
+  getAyahRecitationResources: () => Promise<QuranRecitationResource[]>;
   updateAyahLensSetting: (key: string, value: unknown) => Promise<AyahLensSettings>;
+  qulIsAvailable: () => Promise<boolean>;
+  getQulFontPacks: () => Promise<Record<string, boolean>>;
+  getQulRenderedVerse: (params: {
+    verseKey: string;
+    mushafKey: string;
+    includeTajweed: boolean;
+  }) => Promise<QulRenderedVersePayload | null>;
+  readQulFontFile: (fontAbsolutePath: string) => Promise<Uint8Array | null>;
+  getPrayerSettings: () => Promise<PrayerSettings>;
+  updatePrayerSettings: (patch: Partial<PrayerSettings>) => Promise<PrayerSettings>;
+  getPrayerTimes: () => Promise<PrayerTimesBundle | null>;
+  refreshPrayerTimes: () => Promise<PrayerTimesBundle | null>;
+  getTodos: () => Promise<TodoItem[]>;
+  updateTodoSettings: (patch: Partial<TodoSettings>) => Promise<TodoSettings>;
+  createTodo: (input: CreateTodoInput) => Promise<TodoItem[]>;
+  updateTodo: (todoId: string, patch: UpdateTodoInput) => Promise<TodoItem[]>;
+  completeTodo: (todoId: string, completed: boolean) => Promise<TodoItem[]>;
+  deleteTodo: (todoId: string) => Promise<TodoItem[]>;
+  getPomodoroState: () => Promise<PomodoroState>;
+  updatePomodoroSettings: (patch: Partial<PomodoroSettings>) => Promise<PomodoroState>;
+  startPomodoro: (input: StartPomodoroInput) => Promise<PomodoroState>;
+  pausePomodoro: () => Promise<PomodoroState>;
+  resumePomodoro: () => Promise<PomodoroState>;
+  cancelPomodoro: () => Promise<PomodoroState>;
+  completePomodoro: () => Promise<PomodoroState>;
+  onPomodoroOverlayUpdate: (
+    callback: (payload: {
+      remainingMs: number;
+      kind: PomodoroSessionKind;
+      status: 'running' | 'paused';
+    } | null) => void,
+  ) => void;
+  offPomodoroOverlayUpdate: () => void;
   onAyahOAuthCallback: (callback: (callbackUrl: string) => void) => void;
   getChatHistory: () => Promise<unknown[]>;
   saveChatHistory: (messages: unknown[]) => Promise<boolean>;
@@ -359,14 +507,18 @@ interface AyatiAPI {
   onCronResult: (callback: (data: { jobId: string; jobName: string; status: string; summary: string; timestamp: number }) => void) => void;
   onCronError: (callback: (data: { jobId: string; jobName: string; error: string; timestamp: number }) => void) => void;
   onChatPopup: (callback: (data: unknown) => void) => void;
-  onPetMoving: (callback: (data: { moving: boolean }) => void) => void;
+  onPetMoving: (callback: (data: { moving: boolean; direction?: 'left' | 'right' }) => void) => void;
   onPetCameraSnap: (callback: (data: { captureAtMs: number; durationMs: number; flashDurationMs: number }) => void) => void;
   onPetTransparentSleepChanged: (callback: (enabled: boolean) => void) => void;
   onDevShowPetModeOverlayChanged: (callback: (enabled: boolean) => void) => void;
+  onPetAppearanceChanged: (callback: (appearanceId: string) => void) => void;
   onIdleBehavior: (callback: (data: { type: string; direction?: string }) => void) => void;
   onChatSync: (callback: () => void) => void;
   onSwitchToChat: (callback: () => void) => void;
   onSwitchToSettings: (callback: () => void) => void;
+  onSwitchToPrayers: (callback: () => void) => void;
+  onSwitchToTodos: (callback: () => void) => void;
+  onSwitchToFocus: (callback: () => void) => void;
   petClicked: () => void;
   showPetContextMenu: (x: number, y: number) => void;
   hidePetContextMenu: () => void;

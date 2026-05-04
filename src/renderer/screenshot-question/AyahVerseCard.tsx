@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 
 import type { AyahCollection, AyahReflection } from '../../main/ayah-types';
+import { QulArabicText } from '../components/QulArabicText';
 
 interface AyahVerseCardProps {
   reflection: AyahReflection;
@@ -114,9 +115,12 @@ export function AyahVerseCard({
         <span className={`ayah-sync-state ayah-sync-${reflection.syncState}`}>{reflection.syncState}</span>
       </div>
 
-      <p className="ayah-arabic" dir="rtl" lang="ar">
-        {reflection.arabicText}
-      </p>
+      <QulArabicText
+        verseKey={reflection.verseKey}
+        fallbackText={reflection.arabicText}
+        className="ayah-arabic"
+        variant="card"
+      />
 
       <p className="ayah-translation">{reflection.translation}</p>
 

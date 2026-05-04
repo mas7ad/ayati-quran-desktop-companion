@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ClawBotProvider } from './ai-providers';
+import type { PomodoroPetOverlayPayload } from '../shared/pomodoro-client';
 
 // Expose protected methods to renderer
 contextBridge.exposeInMainWorld('ayati', {
@@ -12,6 +13,8 @@ contextBridge.exposeInMainWorld('ayati', {
   forcePetSleep: () => ipcRenderer.send('force-pet-sleep'),
   forceActiveAppComment: () => ipcRenderer.invoke('dev-force-active-app-comment'),
   forceTimedReminderComment: () => ipcRenderer.invoke('dev-force-timed-reminder-comment'),
+  forcePrayerReminderComment: () => ipcRenderer.invoke('dev-force-prayer-reminder-comment'),
+  forceTodoReminderComment: () => ipcRenderer.invoke('dev-force-todo-reminder-comment'),
   toggleChatbar: () => ipcRenderer.send('toggle-chatbar'),
   closeChatbar: () => ipcRenderer.send('close-chatbar'),
   setChatbarIgnoreMouse: (ignore: boolean) => ipcRenderer.send('chatbar-set-ignore-mouse', ignore),
@@ -29,6 +32,7 @@ contextBridge.exposeInMainWorld('ayati', {
     text: string;
     quickReplies?: string[];
     reflectionId?: string;
+    verseKey?: string;
     arabicText?: string;
     footerText?: string;
   }) =>
@@ -36,11 +40,13 @@ contextBridge.exposeInMainWorld('ayati', {
   hidePetChat: () => ipcRenderer.send('hide-pet-chat'),
   resizePetChat: (width: number, height: number) => ipcRenderer.send('resize-pet-chat', width, height),
   petChatInteracted: () => ipcRenderer.send('pet-chat-interacted'),
+  setPetChatAudioPlaying: (isPlaying: boolean) => ipcRenderer.send('pet-chat-audio-playing', isPlaying),
   onPetChatMessage: (callback: (message: {
     id: string;
     text: string;
     quickReplies?: string[];
     reflectionId?: string;
+    verseKey?: string;
     arabicText?: string;
     footerText?: string;
   }) => void) => {
@@ -99,9 +105,40 @@ contextBridge.exposeInMainWorld('ayati', {
   getQuranStreakSummary: () => ipcRenderer.invoke('ayah-streak-summary'),
   copyReflectionShareCard: (reflectionId: string) => ipcRenderer.invoke('ayah-copy-share-card', reflectionId),
   getAyahLensSettings: () => ipcRenderer.invoke('ayah-settings-get'),
+  getAyahRecitationResources: () => ipcRenderer.invoke('ayah-recitation-resources'),
   updateAyahLensSetting: (key: string, value: unknown) => ipcRenderer.invoke('ayah-settings-update', key, value),
+  qulIsAvailable: () => ipcRenderer.invoke('qul-is-available'),
+  getQulFontPacks: () => ipcRenderer.invoke('qul-font-packs'),
+  getQulRenderedVerse: (params: { verseKey: string; mushafKey: string; includeTajweed: boolean }) =>
+    ipcRenderer.invoke('qul-rendered-verse', params),
+  readQulFontFile: (fontAbsolutePath: string) => ipcRenderer.invoke('qul-read-font', fontAbsolutePath),
   onAyahOAuthCallback: (callback: (callbackUrl: string) => void) => {
     ipcRenderer.on('ayah-oauth-callback', (_event, callbackUrl) => callback(String(callbackUrl)));
+  },
+  getPrayerSettings: () => ipcRenderer.invoke('prayer-settings-get'),
+  updatePrayerSettings: (patch: Partial<PrayerSettings>) => ipcRenderer.invoke('prayer-settings-update', patch),
+  getPrayerTimes: () => ipcRenderer.invoke('prayer-times-get'),
+  refreshPrayerTimes: () => ipcRenderer.invoke('prayer-times-refresh'),
+  getTodos: () => ipcRenderer.invoke('todo-list'),
+  updateTodoSettings: (patch: Partial<TodoSettings>) => ipcRenderer.invoke('todo-settings-update', patch),
+  createTodo: (input: CreateTodoInput) => ipcRenderer.invoke('todo-create', input),
+  updateTodo: (todoId: string, patch: UpdateTodoInput) => ipcRenderer.invoke('todo-update', todoId, patch),
+  completeTodo: (todoId: string, completed: boolean) => ipcRenderer.invoke('todo-complete', todoId, completed),
+  deleteTodo: (todoId: string) => ipcRenderer.invoke('todo-delete', todoId),
+  getPomodoroState: () => ipcRenderer.invoke('pomodoro-state-get'),
+  updatePomodoroSettings: (patch: Partial<PomodoroSettings>) => ipcRenderer.invoke('pomodoro-settings-update', patch),
+  startPomodoro: (input: StartPomodoroInput) => ipcRenderer.invoke('pomodoro-start', input),
+  pausePomodoro: () => ipcRenderer.invoke('pomodoro-pause'),
+  resumePomodoro: () => ipcRenderer.invoke('pomodoro-resume'),
+  cancelPomodoro: () => ipcRenderer.invoke('pomodoro-cancel'),
+  completePomodoro: () => ipcRenderer.invoke('pomodoro-complete'),
+  onPomodoroOverlayUpdate: (callback: (payload: PomodoroPetOverlayPayload | null) => void) => {
+    ipcRenderer.on('pomodoro-overlay-update', (_event, payload: unknown) => {
+      callback(payload as PomodoroPetOverlayPayload | null);
+    });
+  },
+  offPomodoroOverlayUpdate: () => {
+    ipcRenderer.removeAllListeners('pomodoro-overlay-update');
   },
 
   // Chat history
@@ -167,7 +204,7 @@ contextBridge.exposeInMainWorld('ayati', {
   onChatPopup: (callback: (data: unknown) => void) => {
     ipcRenderer.on('chat-popup', (_event, data) => callback(data));
   },
-  onPetMoving: (callback: (data: { moving: boolean }) => void) => {
+  onPetMoving: (callback: (data: { moving: boolean; direction?: 'left' | 'right' }) => void) => {
     ipcRenderer.on('pet-moving', (_event, data) => callback(data));
   },
   onPetCameraSnap: (callback: (data: { captureAtMs: number; durationMs: number; flashDurationMs: number }) => void) => {
@@ -178,6 +215,9 @@ contextBridge.exposeInMainWorld('ayati', {
   },
   onDevShowPetModeOverlayChanged: (callback: (enabled: boolean) => void) => {
     ipcRenderer.on('dev-show-pet-mode-overlay-changed', (_event, enabled) => callback(Boolean(enabled)));
+  },
+  onPetAppearanceChanged: (callback: (appearanceId: string) => void) => {
+    ipcRenderer.on('pet-appearance-changed', (_event, id) => callback(String(id)));
   },
   onIdleBehavior: (callback: (data: { type: string; direction?: string }) => void) => {
     ipcRenderer.on('idle-behavior', (_event, data) => callback(data));
@@ -190,6 +230,15 @@ contextBridge.exposeInMainWorld('ayati', {
   },
   onSwitchToSettings: (callback: () => void) => {
     ipcRenderer.on('switch-to-settings', () => callback());
+  },
+  onSwitchToPrayers: (callback: () => void) => {
+    ipcRenderer.on('switch-to-prayers', () => callback());
+  },
+  onSwitchToTodos: (callback: () => void) => {
+    ipcRenderer.on('switch-to-todos', () => callback());
+  },
+  onSwitchToFocus: (callback: () => void) => {
+    ipcRenderer.on('switch-to-focus', () => callback());
   },
 
   // Pet interactions
@@ -262,6 +311,7 @@ contextBridge.exposeInMainWorld('ayati', {
     ipcRenderer.removeAllListeners('pet-camera-snap');
     ipcRenderer.removeAllListeners('pet-transparent-sleep-changed');
     ipcRenderer.removeAllListeners('dev-show-pet-mode-overlay-changed');
+    ipcRenderer.removeAllListeners('pet-appearance-changed');
     ipcRenderer.removeAllListeners('idle-behavior');
     ipcRenderer.removeAllListeners('chat-sync');
     ipcRenderer.removeAllListeners('switch-to-chat');
@@ -272,6 +322,7 @@ contextBridge.exposeInMainWorld('ayati', {
     ipcRenderer.removeAllListeners('tutorial-hint');
     ipcRenderer.removeAllListeners('tutorial-ended');
     ipcRenderer.removeAllListeners('tutorial-resume-prompt');
+    ipcRenderer.removeAllListeners('pomodoro-overlay-update');
   },
 });
 
@@ -407,18 +458,122 @@ export interface QuranAuthStatus {
 export interface AyahLensSettings {
   translationId: number;
   mushafId: number;
+  qulArabicEnabled?: boolean;
+  qulMushafKey?: string;
+  qulTajweedEnabled?: boolean;
   captureMode: 'fullScreen';
   saveScreenshots: false;
   defaultSave: boolean;
   contextualNudges: boolean;
   nudgeCooldownMinutes: number;
-  maxNudgesPerDay: number;
   timedReminders: boolean;
   timedReminderMinutes: number;
   tafsirResourceId: number | null;
   tafsirResourceName: string | null;
   recitationId: number | null;
   reciterName: string | null;
+}
+
+export interface QulRenderedVersePayload {
+  surahId: number;
+  ayahNumber: number;
+  displayText: string;
+  markupText: string | null;
+  rendererKind: 'pageGlyph' | 'unicodeFont';
+  pageNumber: number | null;
+  fontPostScriptName: string;
+  fontAbsolutePath: string;
+}
+
+export type PrayerName = 'fajr' | 'sunrise' | 'dhuhr' | 'asr' | 'maghrib' | 'isha';
+export interface PrayerTimeEntry {
+  name: PrayerName;
+  label: string;
+  time: string;
+  at: number;
+  isReminderEnabled: boolean;
+}
+export interface PrayerSettings {
+  enabled: boolean;
+  city: string;
+  country: string;
+  method: number;
+  school: 0 | 1;
+  reminderLeadMinutes: number;
+  quietMinutesAfterPrayer: number;
+  hasSavedSettings: boolean;
+}
+export interface PrayerDay {
+  date: string;
+  city: string;
+  country: string;
+  method: number;
+  school: 0 | 1;
+  timezone: string;
+  source: 'aladhan';
+  fetchedAt: number;
+  prayers: PrayerTimeEntry[];
+  error?: string;
+}
+export interface PrayerTimesBundle {
+  today: PrayerDay | null;
+  tomorrow: PrayerDay | null;
+}
+export type TodoPriority = 'none' | 'low' | 'medium' | 'high';
+export interface TodoSettings {
+  petRemindersEnabled: boolean;
+}
+export interface TodoItem {
+  id: string;
+  title: string;
+  notes: string;
+  priority: TodoPriority;
+  createdAt: number;
+  updatedAt: number;
+  dueAt: number | null;
+  reminderAt: number | null;
+  completedAt: number | null;
+}
+export type CreateTodoInput = Pick<TodoItem, 'title'> & Partial<Pick<TodoItem, 'notes' | 'priority' | 'dueAt' | 'reminderAt'>>;
+export type UpdateTodoInput = Partial<Pick<TodoItem, 'title' | 'notes' | 'priority' | 'dueAt' | 'reminderAt'>>;
+export type PomodoroSessionKind = 'focus' | 'shortBreak' | 'longBreak';
+export interface PomodoroSettings {
+  focusMinutes: number;
+  shortBreakMinutes: number;
+  longBreakMinutes: number;
+  sessionsUntilLongBreak: number;
+  petRemindersEnabled: boolean;
+}
+export interface PomodoroActiveSession {
+  id: string;
+  kind: PomodoroSessionKind;
+  status: 'running' | 'paused' | 'completed' | 'cancelled';
+  startedAt: number;
+  pausedAt: number | null;
+  accumulatedPausedMs: number;
+  durationMinutes: number;
+  todoId: string | null;
+  completedAt: number | null;
+}
+export interface PomodoroState {
+  settings: PomodoroSettings;
+  activeSession: PomodoroActiveSession | null;
+  completedFocusCount: number;
+  history: Array<{
+    id: string;
+    kind: PomodoroSessionKind;
+    startedAt: number;
+    completedAt: number;
+    durationMinutes: number;
+    todoId: string | null;
+  }>;
+  sentCompletionIds: string[];
+  remainingMs?: number | null;
+}
+export interface StartPomodoroInput {
+  kind: PomodoroSessionKind;
+  durationMinutes?: number;
+  todoId?: string | null;
 }
 
 export interface OnboardingData {
@@ -517,6 +672,7 @@ export interface PetChatMessagePayload {
   text: string;
   quickReplies?: string[];
   reflectionId?: string;
+  verseKey?: string;
   arabicText?: string;
   footerText?: string;
 }
@@ -530,6 +686,8 @@ export interface AyatiAPI {
   forcePetSleep: () => void;
   forceActiveAppComment: () => Promise<boolean>;
   forceTimedReminderComment: () => Promise<boolean>;
+  forcePrayerReminderComment: () => Promise<boolean>;
+  forceTodoReminderComment: () => Promise<boolean>;
   toggleChatbar: () => void;
   closeChatbar: () => void;
   setChatbarIgnoreMouse: (ignore: boolean) => void;
@@ -542,6 +700,7 @@ export interface AyatiAPI {
   hidePetChat: () => void;
   resizePetChat: (width: number, height: number) => void;
   petChatInteracted: () => void;
+  setPetChatAudioPlaying: (isPlaying: boolean) => void;
   onPetChatMessage: (callback: (message: PetChatMessagePayload) => void) => void;
   petChatReply: (reply: string) => void;
   onPetChatReply: (callback: (reply: string) => void) => void;
@@ -580,8 +739,38 @@ export interface AyatiAPI {
   getQuranStreakSummary: () => Promise<QuranStreakSummary>;
   copyReflectionShareCard: (reflectionId: string) => Promise<boolean>;
   getAyahLensSettings: () => Promise<AyahLensSettings>;
+  getAyahRecitationResources: () => Promise<Array<{ id: number; name: string }>>;
   updateAyahLensSetting: (key: string, value: unknown) => Promise<AyahLensSettings>;
+  qulIsAvailable: () => Promise<boolean>;
+  /** Which verse-script font directories exist under assets/qul/Fonts (partial QUL installs). */
+  getQulFontPacks: () => Promise<Record<string, boolean>>;
+  getQulRenderedVerse: (params: {
+    verseKey: string;
+    mushafKey: string;
+    includeTajweed: boolean;
+  }) => Promise<QulRenderedVersePayload | null>;
+  /** Font bytes for renderer FontFace (file:// URLs are blocked for fonts in Chromium). */
+  readQulFontFile: (fontAbsolutePath: string) => Promise<Uint8Array | null>;
   onAyahOAuthCallback: (callback: (callbackUrl: string) => void) => void;
+  getPrayerSettings: () => Promise<PrayerSettings>;
+  updatePrayerSettings: (patch: Partial<PrayerSettings>) => Promise<PrayerSettings>;
+  getPrayerTimes: () => Promise<PrayerTimesBundle | null>;
+  refreshPrayerTimes: () => Promise<PrayerTimesBundle | null>;
+  getTodos: () => Promise<TodoItem[]>;
+  updateTodoSettings: (patch: Partial<TodoSettings>) => Promise<TodoSettings>;
+  createTodo: (input: CreateTodoInput) => Promise<TodoItem[]>;
+  updateTodo: (todoId: string, patch: UpdateTodoInput) => Promise<TodoItem[]>;
+  completeTodo: (todoId: string, completed: boolean) => Promise<TodoItem[]>;
+  deleteTodo: (todoId: string) => Promise<TodoItem[]>;
+  getPomodoroState: () => Promise<PomodoroState>;
+  updatePomodoroSettings: (patch: Partial<PomodoroSettings>) => Promise<PomodoroState>;
+  startPomodoro: (input: StartPomodoroInput) => Promise<PomodoroState>;
+  pausePomodoro: () => Promise<PomodoroState>;
+  resumePomodoro: () => Promise<PomodoroState>;
+  cancelPomodoro: () => Promise<PomodoroState>;
+  completePomodoro: () => Promise<PomodoroState>;
+  onPomodoroOverlayUpdate: (callback: (payload: PomodoroPetOverlayPayload | null) => void) => void;
+  offPomodoroOverlayUpdate: () => void;
   getChatHistory: () => Promise<unknown[]>;
   saveChatHistory: (messages: unknown[]) => Promise<boolean>;
   clearChatHistory: () => Promise<boolean>;
@@ -612,10 +801,14 @@ export interface AyatiAPI {
   onPetCameraSnap: (callback: (data: { captureAtMs: number; durationMs: number; flashDurationMs: number }) => void) => void;
   onPetTransparentSleepChanged: (callback: (enabled: boolean) => void) => void;
   onDevShowPetModeOverlayChanged: (callback: (enabled: boolean) => void) => void;
+  onPetAppearanceChanged: (callback: (appearanceId: string) => void) => void;
   onIdleBehavior: (callback: (data: { type: string; direction?: string }) => void) => void;
   onChatSync: (callback: () => void) => void;
   onSwitchToChat: (callback: () => void) => void;
   onSwitchToSettings: (callback: () => void) => void;
+  onSwitchToPrayers: (callback: () => void) => void;
+  onSwitchToTodos: (callback: () => void) => void;
+  onSwitchToFocus: (callback: () => void) => void;
   petClicked: () => void;
   showPetContextMenu: (x: number, y: number) => void;
   hidePetContextMenu: () => void;

@@ -1,0 +1,66 @@
+/*
+ * Unicode-markup tajweed (Indo-Pak, etc.) on dark surfaces — tuned for Ayati panels.
+ * COLR page glyphs (Madani V4 Tajweed) are explicitly scoped to the browser's dark palette keyword.
+ */
+.qul-arabic-text--colr-dark {
+  color-scheme: dark;
+  font-palette: dark;
+}
+
+.qul-tjw--ham_wasl,
+.qul-tjw--slnt,
+.qul-tjw--laam_shamsiyah {
+  color: #a3a3a3;
+}
+.qul-tjw--madda_normal {
+  color: #93c5fd;
+}
+.qul-tjw--madda_permissible {
+  color: #fdba74;
+}
+.qul-tjw--madda_necessary {
+  color: #f472b6;
+}
+.qul-tjw--madda_obligatory,
+.qul-tjw--madda_obligatory_mottasel,
+.qul-tjw--madda_obligatory_monfasel {
+  color: #f9a8d4;
+}
+.qul-tjw--qalaqah {
+  color: #38bdf8;
+}
+.qul-tjw--ikhafa {
+  color: #d8b4fe;
+}
+.qul-tjw--ikhafa_shafawi {
+  color: #f0abfc;
+}
+.qul-tjw--iqlab {
+  color: #7dd3fc;
+}
+.qul-tjw--idgham_shafawi {
+  color: #86efac;
+}
+.qul-tjw--idgham_ghunnah,
+.qul-tjw--idgham_wo_ghunnah {
+  color: #4ade80;
+}
+.qul-tjw--idgham_mutajanisayn,
+.qul-tjw--idgham_mutaqaribayn {
+  color: #d4d4d8;
+}
+.qul-tjw--ghunnah {
+  color: #fcd34d;
+}
+.qul-tjw--izhar {
+  color: #86efac;
+}
+.qul-tjw--izhar_shafawi {
+  color: #93c5fd;
+}
+.qul-tjw--tafkheem {
+  color: #67e8f9;
+}
+.qul-tjw--end {
+  color: rgba(255, 255, 255, 0.72);
+}

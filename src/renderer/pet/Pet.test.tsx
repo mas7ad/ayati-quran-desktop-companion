@@ -20,13 +20,35 @@ function getCssRuleBody(styles: string, selectorStart: string): string {
 function installMockAyati(): {
   ayati: Partial<Window['ayati']>;
   sendMood: (data: { state: string; reason?: string }) => void;
+  sendChatPopup: (data: {
+    id: string;
+    text: string;
+    quickReplies?: string[];
+    reflectionId?: string;
+    verseKey?: string;
+    arabicText?: string;
+    footerText?: string;
+  }) => void;
   sendIdleBehavior: (data: { type: string; direction?: string }) => void;
+  sendPetAppearanceChanged: (appearanceId: string) => void;
+  sendPetMoving: (data: { moving: boolean; direction?: 'left' | 'right' }) => void;
 } {
   let moodHandler: (data: { state: string; reason?: string }) => void = () => {};
+  let chatPopupHandler: (data: {
+    id: string;
+    text: string;
+    quickReplies?: string[];
+    reflectionId?: string;
+    verseKey?: string;
+    arabicText?: string;
+    footerText?: string;
+  }) => void = () => {};
   let idleBehaviorHandler: (data: { type: string; direction?: string }) => void = () => {};
+  let petAppearanceHandler: (appearanceId: string) => void = () => {};
+  let petMovingHandler: (data: { moving: boolean; direction?: 'left' | 'right' }) => void = () => {};
   const ayati = {
     getSettings: vi.fn().mockResolvedValue({
-      pet: { transparentWhenSleeping: false },
+      pet: { transparentWhenSleeping: false, appearanceId: 'ayah' },
       dev: { showPetModeOverlay: false },
     }),
     getCursorPosition: vi.fn().mockResolvedValue({ x: 0, y: 0 }),
@@ -43,11 +65,18 @@ function installMockAyati(): {
     }),
     onPetTransparentSleepChanged: vi.fn(),
     onDevShowPetModeOverlayChanged: vi.fn(),
-    onChatPopup: vi.fn(),
+    onPetAppearanceChanged: vi.fn((callback: (appearanceId: string) => void) => {
+      petAppearanceHandler = callback;
+    }),
+    onChatPopup: vi.fn((callback: typeof chatPopupHandler) => {
+      chatPopupHandler = callback;
+    }),
     onClawbotSuggestion: vi.fn(),
     onPetChatReply: vi.fn(),
     onActivityEvent: vi.fn(),
-    onPetMoving: vi.fn(),
+    onPetMoving: vi.fn((callback: (data: { moving: boolean; direction?: 'left' | 'right' }) => void) => {
+      petMovingHandler = callback;
+    }),
     onPetCameraSnap: vi.fn(),
     onIdleBehavior: vi.fn((callback: (data: { type: string; direction?: string }) => void) => {
       idleBehaviorHandler = callback;
@@ -67,79 +96,73 @@ function installMockAyati(): {
   return {
     ayati,
     sendMood: (data) => moodHandler(data),
+    sendChatPopup: (data) => chatPopupHandler(data),
     sendIdleBehavior: (data) => idleBehaviorHandler(data),
+    sendPetAppearanceChanged: (appearanceId) => petAppearanceHandler(appearanceId),
+    sendPetMoving: (data) => petMovingHandler(data),
   };
 }
 
 describe('Pet', () => {
   beforeEach(() => {
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      setTransform: vi.fn(),
+      imageSmoothingEnabled: false,
+    })) as unknown as HTMLCanvasElement['getContext'];
     installMockAyati();
   });
 
-  it('renders the Ayati - Quran Desktop Companion character as animated asset layers', () => {
+  it('renders the Ayah spritesheet companion', () => {
     render(<Pet />);
 
-    const character = screen.getByTestId('ayah-character-pet');
-
-    expect(character).toBeInTheDocument();
-    expect(screen.getAllByTestId('character-leg-layer')).toHaveLength(2);
-    expect(screen.getByTestId('character-body-layer')).toBeInTheDocument();
-    expect(screen.getByTestId('character-head-layer')).toBeInTheDocument();
+    const sprite = screen.getByTestId('ayah-sprite-pet');
+    expect(sprite).toBeInTheDocument();
+    expect(sprite.tagName.toLowerCase()).toBe('canvas');
   });
 
-
-
-  it('renders the face features over the character head', () => {
+  it('updates the rendered spritesheet appearance when the main process broadcasts a change', async () => {
+    const { sendPetAppearanceChanged } = installMockAyati();
     render(<Pet />);
 
-    const head = screen.getByTestId('character-head-layer');
-    const openEyes = screen.getByTestId('character-eye-open-layer');
-    const mouth = screen.getByTestId('character-mouth-neutral-layer');
-
-    expect(Boolean(head.compareDocumentPosition(openEyes) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(Boolean(head.compareDocumentPosition(mouth) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-  });
-
-  it('draws open eyes as glossy dark ovals with tracked pupils', () => {
-    render(<Pet />);
-
-    const openEyes = screen.getByTestId('character-eye-open-layer');
-    const focusGroup = openEyes.querySelector('.character-eye-focus');
-    const eyeShells = openEyes.querySelectorAll('.character-eye-shell');
-
-    expect(eyeShells).toHaveLength(2);
-    eyeShells.forEach((eye) => {
-      expect(eye.tagName.toLowerCase()).toBe('ellipse');
-      expect(eye).toHaveAttribute('fill', '#173f43');
-      expect(Number(eye.getAttribute('ry'))).toBeGreaterThan(Number(eye.getAttribute('rx')));
+    await act(async () => {
+      await Promise.resolve();
     });
-    expect(openEyes.querySelectorAll('.character-eye-glow')).toHaveLength(2);
-    expect(focusGroup?.querySelectorAll('.character-eye-pupil')).toHaveLength(2);
-    expect(focusGroup?.querySelectorAll('.character-eye-highlight')).toHaveLength(4);
-    expect(focusGroup?.querySelector('.character-eye-shell')).toBeNull();
+
+    expect(screen.getByTestId('ayah-sprite-pet')).toHaveAttribute('data-pet-appearance', 'ayah');
+
+    act(() => {
+      sendPetAppearanceChanged('cosmo');
+    });
+
+    expect(screen.getByTestId('ayah-sprite-pet')).toHaveAttribute('data-pet-appearance', 'cosmo');
   });
 
-  it('tracks the dark pupils instead of the fixed eye shells', () => {
+  it('reconciles the rendered appearance from saved settings if the live IPC event is missed', async () => {
+    vi.useFakeTimers();
+    const { ayati } = installMockAyati();
+    let savedAppearanceId = 'ayah';
+    ayati.getSettings = vi.fn().mockImplementation(() => Promise.resolve({
+      pet: { transparentWhenSleeping: false, appearanceId: savedAppearanceId },
+      dev: { showPetModeOverlay: false },
+    }));
     render(<Pet />);
 
-    const openEyes = screen.getByTestId('character-eye-open-layer');
-    const focusGroup = openEyes.querySelector('.character-eye-focus');
+    await act(async () => {
+      await Promise.resolve();
+    });
 
-    expect(focusGroup).not.toBeNull();
-    expect(focusGroup?.querySelector('.character-eye-pupil-left')).not.toBeNull();
-    expect(focusGroup?.querySelector('.character-eye-pupil-right')).not.toBeNull();
-    expect(focusGroup?.querySelector('.character-eye-shell')).toBeNull();
-  });
+    expect(screen.getByTestId('ayah-sprite-pet')).toHaveAttribute('data-pet-appearance', 'ayah');
 
-  it('renders both hands above the body layer', () => {
-    render(<Pet />);
+    savedAppearanceId = 'bolt';
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+      await Promise.resolve();
+    });
 
-    const body = screen.getByTestId('character-body-layer');
-    const leftHand = screen.getByTestId('character-left-hand-layer');
-    const rightHand = screen.getByTestId('character-right-hand-layer');
-
-    expect(Boolean(body.compareDocumentPosition(leftHand) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(Boolean(body.compareDocumentPosition(rightHand) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(screen.getByTestId('ayah-sprite-pet')).toHaveAttribute('data-pet-appearance', 'bolt');
+    vi.useRealTimers();
   });
 
   it('ignores hand wave idle events while the wave behavior is disabled', async () => {
@@ -170,17 +193,66 @@ describe('Pet', () => {
     });
 
     const characterShell = screen.getByTestId('ayah-character-shell');
-    expect(characterShell).toHaveClass('state-sleep');
+    expect(characterShell).toHaveAttribute('data-visual-state', 'sleeping');
 
     fireEvent.click(characterShell);
 
-    expect(characterShell).toHaveClass('state-idle');
+    expect(characterShell).toHaveAttribute('data-visual-state', 'idle');
+    expect(characterShell).toHaveAttribute('data-pet-clip', 'jumping');
     expect(characterShell).toHaveClass('wake-window-flight');
-    expect(characterShell).not.toHaveClass('wake-flip');
     expect(characterShell).not.toHaveClass('idle-wave');
-    expect(characterShell).not.toHaveClass('state-sleep');
     expect(ayati.playPetWakeFlight).toHaveBeenCalled();
     expect(ayati.petClicked).toHaveBeenCalled();
+  });
+
+  it('uses running-left clip when the main process reports leftward movement', async () => {
+    const { sendPetMoving } = installMockAyati();
+    render(<Pet />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      sendPetMoving({ moving: true, direction: 'left' });
+    });
+
+    expect(screen.getByTestId('ayah-character-shell')).toHaveAttribute('data-pet-clip', 'running-left');
+
+    act(() => {
+      sendPetMoving({ moving: false });
+    });
+
+    expect(screen.getByTestId('ayah-character-shell')).toHaveAttribute('data-pet-clip', 'idle');
+  });
+
+  it('keeps verse keys when forwarding Quran popups to the pet chat window', async () => {
+    const { ayati, sendChatPopup } = installMockAyati();
+    render(<Pet />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      sendChatPopup({
+        id: 'popup-1',
+        text: 'Time for a Quran reminder',
+        quickReplies: ['Listen', 'Tafsir', 'Reflect', 'Save', 'Dismiss'],
+        reflectionId: 'reflection-1',
+        verseKey: '2:286',
+        arabicText: 'لَا يُكَلِّفُ ٱللَّهُ نَفْسًا إِلَّا وُسْعَهَا',
+        footerText: 'Allah does not burden a soul beyond that it can bear.',
+      });
+    });
+
+    expect(ayati.showPetChat).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'popup-1',
+      reflectionId: 'reflection-1',
+      verseKey: '2:286',
+      arabicText: 'لَا يُكَلِّفُ ٱللَّهُ نَفْسًا إِلَّا وُسْعَهَا',
+      footerText: 'Allah does not burden a soul beyond that it can bear.',
+    }));
   });
 
   it('does not define hand wave animation rules while wave is disabled', () => {
@@ -214,6 +286,4 @@ describe('Pet', () => {
     expect(leftSleepHandRule).not.toMatch(/translate\([^)]*,\s*[1-9][\d.]*px\)/);
     expect(rightSleepHandRule).not.toMatch(/translate\([^)]*,\s*[1-9][\d.]*px\)/);
   });
-
-
 });

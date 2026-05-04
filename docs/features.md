@@ -93,7 +93,6 @@ Use this as the demo-video checklist. The strongest story is: Ayati - Quran Desk
 - Rule-based context classifier for study, planning, pressure, work, design, shopping, distraction, and conflict.
 - Sensitive app and sensitive-title suppression for passwords, banking, medical, payroll, private messages, and similar contexts.
 - Cooldown minutes setting.
-- Maximum nudges per day setting.
 - Repeat suppression for the same app/theme pair.
 - Companion popup with quick replies: **Reflect**, **Save**, and **Not now**.
 - Nudge reflections are also added to local reflection history.

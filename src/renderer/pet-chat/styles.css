@@ -2,10 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Speech bubble */
 .pet-speech-bubble {
   position: relative;
-  filter: drop-shadow(0 14px 28px rgba(0, 0, 0, 0.3));
 }
 
 .pet-speech-bubble-panel {
@@ -22,7 +20,6 @@
 .pet-chat-arabic {
   margin-top: 10px;
   color: #e8edf0;
-  font-family: 'Amiri', 'Scheherazade New', 'Geeza Pro', 'Times New Roman', serif;
   font-size: 22px;
   line-height: 1.75;
   text-align: right;
@@ -33,6 +30,34 @@
   color: #d4d4d8;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.pet-chat-tafsir {
+  margin-top: 12px;
+  max-height: 178px;
+  overflow-y: auto;
+  border: 1px solid rgba(103, 224, 163, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 9px 10px;
+}
+
+.pet-chat-tafsir-title {
+  color: #67E0A3;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.pet-chat-tafsir-body {
+  margin-top: 6px;
+  color: #d4d4d8;
+  font-size: 12px;
+  line-height: 1.58;
+}
+
+.pet-chat-tafsir-body p + p {
+  margin-top: 7px;
 }
 
 .pet-chat-reflect-field {

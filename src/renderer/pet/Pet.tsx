@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import bodyUrl from '../../../assets/character/body.svg';
-import headUrl from '../../../assets/character/head.svg';
-import leftHandUrl from '../../../assets/character/left-hand.svg';
-
-import legUrl from '../../../assets/character/leg.svg';
-import rightHandUrl from '../../../assets/character/right-hand.svg';
-
+import { normalizePetAppearanceId, type PetAppearanceId } from '../../shared/pet-appearance';
+import { SpritePet } from './SpritePet';
+import {
+  isSleepVisualState,
+  normalizeIncomingPetState,
+  resolveSpriteClip,
+  type LegacyMood,
+  type PetVisualState,
+} from './pet-sprite-logic';
 import { TutorialOverlay } from './TutorialOverlay';
 
-type Mood = 'idle' | 'happy' | 'curious' | 'sleeping' | 'thinking' | 'excited' | 'doze' | 'startle' | 'proud' | 'mad' | 'spin' | 'mouth_o';
 type IdleBehavior = 'blink' | 'look_around' | 'snip_claws' | 'yawn' | 'stretch' | 'wiggle' | 'wander' | null;
 
 interface ChatMessage {
@@ -18,12 +19,12 @@ interface ChatMessage {
   trigger?: 'app_switch' | 'idle' | 'proactive' | 'suggestion';
   quickReplies?: string[];
   reflectionId?: string;
+  verseKey?: string;
   arabicText?: string;
   footerText?: string;
 }
 
 const DEFAULT_QUICK_REPLIES = ['Thanks!', 'Tell me more', 'Not now'];
-const isSleepMood = (nextMood: Mood): boolean => nextMood === 'sleeping' || nextMood === 'doze';
 const WAKE_WINDOW_FLIGHT_DURATION_MS = 1100;
 const IDLE_BEHAVIOR_DURATIONS_MS: Record<NonNullable<IdleBehavior>, number> = {
   blink: 400,
@@ -45,197 +46,15 @@ const isIdleBehavior = (nextIdleBehavior: string | null | undefined): nextIdleBe
   Boolean(nextIdleBehavior && IDLE_BEHAVIORS.has(nextIdleBehavior))
 );
 const shouldReduceMotion = (): boolean => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
-
-// Map internal moods to lobster animation states
-const moodToState = (mood: Mood): string => {
-  switch (mood) {
-    case 'happy':
-    case 'excited':
-      return 'state-happy';
-    case 'curious':
-      return 'state-snip';
-    case 'sleeping':
-      return 'state-sleep';
-    case 'doze':
-      return 'state-doze';
-    case 'startle':
-      return 'state-startle';
-    case 'proud':
-      return 'state-proud';
-    case 'mad':
-      return 'state-crossed';
-    case 'spin':
-      return 'state-spin';
-    case 'mouth_o':
-      return 'state-mouth-o';
-    case 'thinking':
-      return 'state-worried';
-    default:
-      return 'state-idle';
-  }
-};
-
-interface CharacterSvgProps {
-  pupilOffset: { x: number; y: number } | null;
-}
-
-export const CharacterSvg: React.FC<CharacterSvgProps> = ({ pupilOffset }) => (
-  <svg viewBox="0 0 128 128" data-testid="ayah-character-pet" aria-hidden="true">
-
-    <g className="body-group">
-      <image
-        data-testid="character-leg-layer"
-        className="character-layer character-leg-layer"
-        href={legUrl}
-        x="5"
-        y="70"
-        width="84"
-        height="84"
-      />
-      <image
-        data-testid="character-leg-layer"
-        className="character-layer character-leg-layer"
-        href={legUrl}
-        x="35"
-        y="70"
-        width="84"
-        height="84"
-      />
-      <image
-        data-testid="character-body-layer"
-        className="character-layer character-body-layer"
-        href={bodyUrl}
-        x="0"
-        y="10"
-        width="128"
-        height="128"
-      />
-      <image
-        data-testid="character-head-layer"
-        className="character-layer character-head-layer"
-        href={headUrl}
-        x="0"
-        y="-30"
-        width="128"
-        height="128"
-      />
-
-      <g className="face character-face-overlay" transform="translate(-5 -15)">
-        <g className="eye-open" data-testid="character-eye-open-layer">
-          <ellipse className="character-eye-shell character-eye-shell-left" cx="49" cy="58" rx="8.8" ry="10.2" fill="#173f43" />
-          <ellipse className="character-eye-shell character-eye-shell-right" cx="83" cy="58" rx="8.8" ry="10.2" fill="#173f43" />
-          <ellipse className="character-eye-glow character-eye-glow-left" cx="49" cy="63.5" rx="6.7" ry="3.6" fill="#8ee5c4" opacity="0.48" />
-          <ellipse className="character-eye-glow character-eye-glow-right" cx="83" cy="63.5" rx="6.7" ry="3.6" fill="#8ee5c4" opacity="0.48" />
-          <g
-            className="pupils character-eye-focus"
-            style={pupilOffset ? { transform: `translate(${pupilOffset.x}px, ${pupilOffset.y}px)` } : undefined}
-          >
-            <g className="character-eye-pupil character-eye-pupil-left">
-              <ellipse cx="49" cy="58.6" rx="5.1" ry="6.2" fill="#0d3034" />
-              <ellipse className="character-eye-highlight" cx="46.2" cy="54.6" rx="2.5" ry="1.35" fill="#dfffe9" transform="rotate(-32 46.2 54.6)" />
-              <ellipse className="character-eye-highlight" cx="52.8" cy="61" rx="1.2" ry="2" fill="#dfffe9" transform="rotate(34 52.8 61)" opacity="0.9" />
-            </g>
-            <g className="character-eye-pupil character-eye-pupil-right">
-              <ellipse cx="83" cy="58.6" rx="5.1" ry="6.2" fill="#0d3034" />
-              <ellipse className="character-eye-highlight" cx="80.2" cy="54.6" rx="2.5" ry="1.35" fill="#dfffe9" transform="rotate(-32 80.2 54.6)" />
-              <ellipse className="character-eye-highlight" cx="86.8" cy="61" rx="1.2" ry="2" fill="#dfffe9" transform="rotate(34 86.8 61)" opacity="0.9" />
-            </g>
-          </g>
-        </g>
-        <g className="eye-closed">
-          <path
-            d="M 40 57 Q 48 62 56 57"
-            fill="none"
-            stroke="var(--ink)"
-            strokeWidth="3"
-            strokeLinecap="round"
-          />
-          <path
-            d="M 72 57 Q 80 62 88 57"
-            fill="none"
-            stroke="var(--ink)"
-            strokeWidth="3"
-            strokeLinecap="round"
-          />
-        </g>
-        <path
-          className="mouth-neutral"
-          data-testid="character-mouth-neutral-layer"
-          d="M 60 68 Q 64 71 68 68"
-          fill="none"
-          stroke="var(--ink)"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        <path
-          className="mouth-mad"
-          d="M 59 72 Q 64 68 69 72"
-          fill="none"
-          stroke="var(--ink)"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-        />
-        <path
-          className="mouth-happy"
-          d="M 58 66 Q 64 74 70 66"
-          fill="none"
-          stroke="var(--ink)"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-        />
-        <circle className="mouth-worried" cx="64" cy="70" r="2.5" fill="var(--ink)" />
-        <circle className="mouth-o" cx="64" cy="70" r="3.4" fill="var(--ink)" />
-      </g>
-    </g>
-
-    <g className="character-left-hand-top-layer">
-      <image
-        data-testid="character-left-hand-layer"
-        className="character-layer"
-        href={leftHandUrl}
-        x="55"
-        y="70"
-        width="50"
-        height="50"
-      />
-    </g>
-
-    <g className="character-right-hand-top-layer">
-      <image
-        data-testid="character-right-hand-layer"
-        className="character-layer"
-        href={rightHandUrl}
-        x="20"
-        y="70"
-        width="50"
-        height="50"
-      />
-    </g>
-
-    <g className="fx-zzz">
-      <text x="85" y="40" fill="white" fontWeight="bold" fontSize="14">
-        Z
-      </text>
-      <text x="95" y="25" fill="white" fontWeight="bold" fontSize="10">
-        z
-      </text>
-    </g>
-    <g className="fx-sweat">
-      <path d="M 35 35 Q 30 45 35 50 Q 40 45 35 35 Z" fill="#87CEFA" opacity="0.8" />
-    </g>
-    <g className="fx-alert">
-      <text x="88" y="32" fill="white" fontWeight="bold" fontSize="18">
-        !
-      </text>
-    </g>
-  </svg>
-);
+const PET_APPEARANCE_SETTINGS_SYNC_MS = 1000;
 
 export const Pet: React.FC = () => {
-  const [mood, setMood] = useState<Mood>('idle');
+  const [appearanceId, setAppearanceId] = useState<PetAppearanceId>('ayah');
+  const [visualState, setVisualState] = useState<PetVisualState>('idle');
   const [isWalking, setIsWalking] = useState(false);
+  const [walkDirection, setWalkDirection] = useState<'left' | 'right' | null>(null);
+  const [dragRun, setDragRun] = useState<{ dir: 'left' | 'right' } | null>(null);
   const [idleBehavior, setIdleBehavior] = useState<IdleBehavior>(null);
-  const [pupilOffset, setPupilOffset] = useState<{ x: number; y: number } | null>(null);
   const [tutorialActive, setTutorialActive] = useState(false);
   const [transparentWhenSleeping, setTransparentWhenSleeping] = useState(false);
   const [showModeOverlay, setShowModeOverlay] = useState(false);
@@ -252,11 +71,12 @@ export const Pet: React.FC = () => {
   const wakeWindowFlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const sleepLockedRef = useRef(false);
 
-  const setPetMood = useCallback((nextMood: Mood) => {
-    const sleeping = isSleepMood(nextMood);
+  const setPetVisualState = useCallback((next: PetVisualState) => {
+    const sleeping = isSleepVisualState(next);
     sleepLockedRef.current = sleeping;
     if (sleeping) {
       setIsWalking(false);
+      setWalkDirection(null);
       if (idleBehaviorTimeoutRef.current) {
         clearTimeout(idleBehaviorTimeoutRef.current);
         idleBehaviorTimeoutRef.current = null;
@@ -268,12 +88,12 @@ export const Pet: React.FC = () => {
       setIdleBehavior(null);
       setWakeWindowFlightActive(false);
     }
-    setMood(nextMood);
+    setVisualState(next);
   }, []);
 
-  const canApplyMoodUpdate = useCallback((nextMood: Mood): boolean => {
+  const canApplyMoodUpdate = useCallback((next: PetVisualState): boolean => {
     if (!sleepLockedRef.current) return true;
-    return nextMood === 'sleeping' || nextMood === 'doze' || nextMood === 'startle' || nextMood === 'idle';
+    return next === 'sleeping' || next === 'doze' || next === 'startle' || next === 'idle';
   }, []);
 
   const playIdleBehavior = useCallback((nextIdleBehavior: IdleBehavior) => {
@@ -307,69 +127,42 @@ export const Pet: React.FC = () => {
     }, WAKE_WINDOW_FLIGHT_DURATION_MS);
   }, []);
 
-  // Cursor tracking for pupils
-  useEffect(() => {
-    const TRACKING_RANGE = 300;
-    const MAX_OFFSET = 3;
-    const POLL_MS = 100;
-    const PET_SIZE = 120;
+  const syncAppearanceFromSettings = useCallback(async (shouldApply: () => boolean = () => true) => {
+    const settings = await window.ayati.getSettings();
+    if (!shouldApply()) return;
 
-    const interval = setInterval(async () => {
-      // Only track when idle
-      if (mood !== 'idle') {
-        setPupilOffset(null);
-        return;
-      }
-
-      try {
-        const [cursor, petPos] = await Promise.all([
-          window.ayati.getCursorPosition(),
-          window.ayati.getPetPosition(),
-        ]);
-
-        const petCenterX = petPos[0] + PET_SIZE / 2;
-        const petCenterY = petPos[1] + PET_SIZE / 2;
-
-        const dx = cursor.x - petCenterX;
-        const dy = cursor.y - petCenterY;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (distance < TRACKING_RANGE && distance > 0) {
-          const nx = dx / distance;
-          const ny = dy / distance;
-          setPupilOffset({
-            x: Math.round(nx * MAX_OFFSET * 10) / 10,
-            y: Math.round(ny * MAX_OFFSET * 10) / 10,
-          });
-        } else {
-          setPupilOffset(null);
-        }
-      } catch {
-        // IPC failure — fall back to idle animation
-        setPupilOffset(null);
-      }
-    }, POLL_MS);
-
-    return () => clearInterval(interval);
-  }, [mood]);
+    const typedSettings = settings as {
+      pet?: { transparentWhenSleeping?: boolean; appearanceId?: string };
+      dev?: { showPetModeOverlay?: boolean };
+    };
+    const petSettings = typedSettings.pet;
+    const devSettings = typedSettings.dev;
+    setTransparentWhenSleeping(Boolean(petSettings?.transparentWhenSleeping));
+    setAppearanceId(normalizePetAppearanceId(petSettings?.appearanceId));
+    setShowModeOverlay(Boolean(devSettings?.showPetModeOverlay));
+  }, []);
 
   // Handle mood updates from ClawBot
   useEffect(() => {
-    window.ayati.getSettings().then((settings) => {
-      const typedSettings = settings as {
-        pet?: { transparentWhenSleeping?: boolean };
-        dev?: { showPetModeOverlay?: boolean };
-      };
-      const petSettings = typedSettings.pet;
-      const devSettings = typedSettings.dev;
-      setTransparentWhenSleeping(Boolean(petSettings?.transparentWhenSleeping));
-      setShowModeOverlay(Boolean(devSettings?.showPetModeOverlay));
-    });
+    let isMounted = true;
+    const syncIfMounted = async () => {
+      if (!isMounted) return;
+      try {
+        await syncAppearanceFromSettings(() => isMounted);
+      } catch (error) {
+        console.warn('[Pet] Failed to sync appearance settings:', error);
+      }
+    };
+    void syncIfMounted();
+    const appearanceSettingsSyncInterval = window.setInterval(() => {
+      void syncIfMounted();
+    }, PET_APPEARANCE_SETTINGS_SYNC_MS);
 
     window.ayati.onClawbotMood((data: unknown) => {
-      const moodData = data as { state: Mood; reason?: string };
-      if (!canApplyMoodUpdate(moodData.state)) return;
-      setPetMood(moodData.state);
+      const moodData = data as { state: string; reason?: string };
+      const next = normalizeIncomingPetState(moodData.state);
+      if (!canApplyMoodUpdate(next)) return;
+      setPetVisualState(next);
     });
 
     window.ayati.onPetTransparentSleepChanged((enabled: boolean) => {
@@ -379,7 +172,12 @@ export const Pet: React.FC = () => {
       setShowModeOverlay(enabled);
     });
 
-    // Handle chat messages from main process - show in separate window
+    if (typeof window.ayati.onPetAppearanceChanged === 'function') {
+      window.ayati.onPetAppearanceChanged((id: unknown) => {
+        setAppearanceId(normalizePetAppearanceId(id));
+      });
+    }
+
     window.ayati.onChatPopup((data: unknown) => {
       const messageData = data as ChatMessage;
       const message = {
@@ -387,12 +185,13 @@ export const Pet: React.FC = () => {
         text: messageData.text || messageData.content || '',
         quickReplies: messageData.quickReplies || DEFAULT_QUICK_REPLIES,
         reflectionId: messageData.reflectionId,
+        verseKey: messageData.verseKey,
         arabicText: messageData.arabicText,
         footerText: messageData.footerText,
       };
       window.ayati.showPetChat(message);
       if (!sleepLockedRef.current) {
-        setPetMood('curious');
+        setPetVisualState('curious');
       }
     });
 
@@ -412,18 +211,18 @@ export const Pet: React.FC = () => {
       if (sleepLockedRef.current) return;
 
       if (reply === 'thanks') {
-        setPetMood('happy');
+        setPetVisualState('happy');
         setTimeout(() => {
           if (!sleepLockedRef.current) {
-            setPetMood('idle');
+            setPetVisualState('idle');
           }
         }, 2000);
       } else if (reply === 'thinking') {
-        setPetMood('thinking');
+        setPetVisualState('thinking');
       } else if (reply === 'curious') {
-        setPetMood('curious');
+        setPetVisualState('curious');
       } else if (reply === 'dismiss') {
-        setPetMood('idle');
+        setPetVisualState('idle');
       }
     });
 
@@ -433,22 +232,24 @@ export const Pet: React.FC = () => {
       const activityEvent = event as { type: string };
       // React to activity - show curiosity briefly
       if (activityEvent.type === 'app_focus_changed') {
-        setPetMood('curious');
+        setPetVisualState('curious');
         setTimeout(() => {
           if (!sleepLockedRef.current) {
-            setPetMood('idle');
+            setPetVisualState('idle');
           }
         }, 3000);
       }
     });
 
     // Listen for pet movement events
-    window.ayati.onPetMoving((data) => {
+    window.ayati.onPetMoving((data: { moving: boolean; direction?: 'left' | 'right' }) => {
       if (sleepLockedRef.current) {
         setIsWalking(false);
+        setWalkDirection(null);
         return;
       }
       setIsWalking(data.moving);
+      setWalkDirection(data.moving && data.direction ? data.direction : null);
     });
 
     window.ayati.onPetCameraSnap((data) => {
@@ -521,13 +322,31 @@ export const Pet: React.FC = () => {
       if (wakeWindowFlightTimeoutRef.current) {
         clearTimeout(wakeWindowFlightTimeoutRef.current);
       }
+      isMounted = false;
+      window.clearInterval(appearanceSettingsSyncInterval);
       window.ayati.removeAllListeners();
     };
-  }, [canApplyMoodUpdate, playIdleBehavior, setPetMood]);
+  }, [canApplyMoodUpdate, playIdleBehavior, setPetVisualState, syncAppearanceFromSettings]);
 
-  const isSleepTransparent = transparentWhenSleeping && (mood === 'sleeping' || mood === 'doze');
+  const isSleepTransparent = transparentWhenSleeping && (visualState === 'sleeping' || visualState === 'doze');
   const shouldShowModeOverlay = import.meta.env.DEV && showModeOverlay;
-  const currentMode = wakeWindowFlightActive ? 'wake-window-flight' : isWalking ? 'walking' : idleBehavior ? `idle:${idleBehavior}` : `mood:${mood}`;
+  const spriteClip = resolveSpriteClip({
+    visualState,
+    isWalking,
+    walkDirection,
+    wakeWindowFlightActive,
+    cameraSnapActive,
+    userDragRun: dragRun,
+  });
+  const currentMode = wakeWindowFlightActive
+    ? 'wake-window-flight'
+    : dragRun
+      ? `drag:${dragRun.dir}`
+      : isWalking
+        ? `walk:${walkDirection ?? 'run'}`
+        : idleBehavior
+          ? `idle:${idleBehavior}`
+          : `state:${visualState} clip:${spriteClip}`;
 
   // Handle dragging - use document-level events to track fast mouse movements
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -547,6 +366,9 @@ export const Pet: React.FC = () => {
       }
 
       if (didDragRef.current) {
+        if (Math.abs(deltaX) > 2) {
+          setDragRun({ dir: deltaX > 0 ? 'right' : 'left' });
+        }
         window.ayati.dragPet(deltaX, deltaY);
         dragStart.current = { x: moveEvent.screenX, y: moveEvent.screenY };
       }
@@ -554,6 +376,7 @@ export const Pet: React.FC = () => {
 
     const handleDocumentMouseUp = () => {
       isDraggingRef.current = false;
+      setDragRun(null);
       document.removeEventListener('mousemove', handleDocumentMouseMove);
       document.removeEventListener('mouseup', handleDocumentMouseUp);
     };
@@ -563,7 +386,7 @@ export const Pet: React.FC = () => {
   }, []);
 
   // Poke reactions - random animations when clicked
-  const pokeReactions: Array<{ mood?: Mood; behavior?: IdleBehavior; duration: number }> = [
+  const pokeReactions: Array<{ mood?: LegacyMood; behavior?: IdleBehavior; duration: number }> = [
     // Happy reactions
     { mood: 'happy', duration: 1500 },
     { mood: 'excited', duration: 1500 },
@@ -595,7 +418,7 @@ export const Pet: React.FC = () => {
     }
 
     if (sleepLockedRef.current) {
-      setPetMood('idle');
+      setPetVisualState('idle');
       playWakeWindowFlight();
       window.ayati.petClicked?.();
       return;
@@ -605,10 +428,10 @@ export const Pet: React.FC = () => {
     const reaction = pokeReactions[Math.floor(Math.random() * pokeReactions.length)];
 
     if (reaction.mood) {
-      setPetMood(reaction.mood);
+      setPetVisualState(reaction.mood);
       setTimeout(() => {
         if (!sleepLockedRef.current) {
-          setPetMood('idle');
+          setPetVisualState('idle');
         }
       }, reaction.duration);
     } else if (reaction.behavior) {
@@ -622,7 +445,7 @@ export const Pet: React.FC = () => {
 
     // Notify main process (optional - for sound effects or other reactions)
     window.ayati.petClicked?.();
-  }, [playWakeWindowFlight, setPetMood, tutorialActive]);
+  }, [playWakeWindowFlight, setPetVisualState, tutorialActive]);
 
   // Right click = open custom context menu
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -647,9 +470,11 @@ export const Pet: React.FC = () => {
       {/* Animated companion pet */}
       <div
         data-testid="ayah-character-shell"
-        className={`lobster-container ${moodToState(mood)} ${isWalking ? 'state-walking' : ''} ${idleBehavior ? `idle-${idleBehavior}` : ''} ${pupilOffset ? 'tracking-cursor' : ''} ${isSleepTransparent ? 'sleep-transparent' : ''} ${cameraSnapActive ? 'action-camera-snap' : ''} ${wakeWindowFlightActive ? 'wake-window-flight' : ''}`}
+        data-pet-clip={spriteClip}
+        data-visual-state={visualState}
+        className={`lobster-container sprite-pet-root ${isSleepTransparent ? 'sleep-transparent' : ''} ${cameraSnapActive ? 'action-camera-snap' : ''} ${wakeWindowFlightActive ? 'wake-window-flight' : ''}`}
       >
-        <CharacterSvg pupilOffset={pupilOffset} />
+        <SpritePet appearanceId={appearanceId} clip={spriteClip} />
         <div className="camera-prop" aria-hidden="true">
           <span className="camera-shutter" />
           <span className="camera-lens" />

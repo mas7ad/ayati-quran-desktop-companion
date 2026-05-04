@@ -16,7 +16,6 @@ const APP_THEME_REPEAT_MS = 2 * 60 * 60 * 1000;
 const MAX_RECENT_APP_THEME_KEYS = 30;
 const MIN_ACTIONABLE_CONFIDENCE = 0.58;
 const DEFAULT_NUDGE_COOLDOWN_MINUTES = 15;
-const DEFAULT_MAX_NUDGES_PER_DAY = 8;
 const DEFAULT_TIMED_REMINDER_MINUTES = 15;
 const DEFAULT_TIMED_REMINDER_FETCH_TIMEOUT_MS = 700;
 const TIMED_REMINDER_REFLECTION = 'Pause for a Quran reminder and let this ayah reset the next moment.';
@@ -40,6 +39,7 @@ export interface ContextualNudgeResult {
   message: {
     id: string;
     text: string;
+    verseKey?: string;
     /** Arabic ayah text; shown RTL in the pet chat bubble (like Reflect on screen). */
     arabicText?: string;
     /** English translation shown below the Arabic line. */
@@ -284,11 +284,6 @@ function canShowNudge(
     return false;
   }
 
-  const maxNudgesPerDay = Math.max(1, settings.maxNudgesPerDay || DEFAULT_MAX_NUDGES_PER_DAY);
-  if (state.shownToday >= maxNudgesPerDay) {
-    return false;
-  }
-
   return !state.recentAppThemeKeys.some((item) => (
     item.key === appThemeKey && now - item.shownAt < APP_THEME_REPEAT_MS
   ));
@@ -302,7 +297,8 @@ function canShowTimedReminder(
   if (!settings.timedReminders) return false;
 
   const intervalMinutes = Math.max(1, settings.timedReminderMinutes || DEFAULT_TIMED_REMINDER_MINUTES);
-  return !state.lastTimedReminderAt || now - state.lastTimedReminderAt >= intervalMinutes * 60 * 1000;
+  const lastReminderAt = Math.max(state.lastShownAt ?? 0, state.lastTimedReminderAt ?? 0);
+  return !lastReminderAt || now - lastReminderAt >= intervalMinutes * 60 * 1000;
 }
 
 function getNextNudgeState(
@@ -430,10 +426,11 @@ export async function buildContextualQuranNudge(input: ContextualNudgeInput): Pr
     message: {
       id: randomUUID(),
       text: buildPopupIntro(classified.label, verse),
+      verseKey: verse.verseKey,
       arabicText: verse.arabicText,
       footerText: verse.translation,
       trigger: 'app_switch',
-      quickReplies: ['Reflect', 'Save', 'Not now'],
+      quickReplies: ['Listen', 'Tafsir', 'Reflect', 'Save', 'Dismiss'],
       reflectionId: reflection.id,
     },
   };
@@ -466,10 +463,11 @@ export async function buildTimedQuranReminder(input: TimedQuranReminderInput): P
     message: {
       id: randomUUID(),
       text: buildTimedReminderIntro(verse),
+      verseKey: verse.verseKey,
       arabicText: verse.arabicText,
       footerText: verse.translation,
       trigger: 'timer',
-      quickReplies: ['Reflect', 'Save', 'Not now'],
+      quickReplies: ['Listen', 'Tafsir', 'Reflect', 'Save', 'Dismiss'],
       reflectionId: reflection.id,
     },
   };

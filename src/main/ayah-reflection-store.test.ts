@@ -30,6 +30,14 @@ function createReflection(overrides: Partial<AyahReflection> = {}): AyahReflecti
 }
 
 describe('ayah reflection store helpers', () => {
+  it('defaults prayer calculation to Moonsighting Committee Worldwide', () => {
+    expect(createDefaultAyahLensState().prayer.settings.method).toBe(15);
+  });
+
+  it('defaults QUL Arabic to a page-glyph mushaf track', () => {
+    expect(createDefaultAyahLensState().preferences.qulMushafKey).toBe('madani1421');
+  });
+
   it('stores text-only reflection history and drops screenshot-like fields', () => {
     const state = createDefaultAyahLensState();
     const reflection = {

@@ -1,0 +1,6 @@
+{
+  "id": "bolt",
+  "displayName": "Bolt",
+  "description": "A cute compact robot companion with a friendly screen face and tiny limbs.",
+  "spritesheetPath": "spritesheet.webp"
+}

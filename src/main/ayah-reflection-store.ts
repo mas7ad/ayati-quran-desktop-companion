@@ -26,12 +26,14 @@ export function createDefaultAyahLensState(): AyahLensState {
     preferences: {
       translationId: 20,
       mushafId: 4,
+      qulArabicEnabled: true,
+      qulMushafKey: 'madani1421',
+      qulTajweedEnabled: false,
       captureMode: 'fullScreen',
       saveScreenshots: false,
       defaultSave: false,
       contextualNudges: true,
       nudgeCooldownMinutes: 15,
-      maxNudgesPerDay: 8,
       timedReminders: false,
       timedReminderMinutes: 15,
       tafsirResourceId: null,
@@ -51,6 +53,41 @@ export function createDefaultAyahLensState(): AyahLensState {
     pendingSync: [],
     recentVerseKeys: [],
     verseCache: {},
+    prayer: {
+      settings: {
+        enabled: false,
+        city: '',
+        country: '',
+        method: 15,
+        school: 0,
+        reminderLeadMinutes: 10,
+        quietMinutesAfterPrayer: 15,
+        hasSavedSettings: false,
+      },
+      today: null,
+      tomorrow: null,
+      sentReminderKeys: [],
+    },
+    todos: {
+      settings: {
+        petRemindersEnabled: true,
+      },
+      items: [],
+      sentReminderIds: [],
+    },
+    pomodoro: {
+      settings: {
+        focusMinutes: 25,
+        shortBreakMinutes: 5,
+        longBreakMinutes: 15,
+        sessionsUntilLongBreak: 4,
+        petRemindersEnabled: true,
+      },
+      activeSession: null,
+      completedFocusCount: 0,
+      history: [],
+      sentCompletionIds: [],
+    },
   };
 }
 

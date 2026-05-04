@@ -38,6 +38,17 @@ describe('shouldHideWindowOnBlur', () => {
     expect(mainSource).not.toContain('screenshotQuestionWindow.focus()');
   });
 
+  it('keeps assistant and chatbar shortcut windows mutually exclusive', () => {
+    const mainSource = readFileSync(path.join(process.cwd(), 'src/main/main.ts'), 'utf8');
+
+    expect(mainSource).toMatch(
+      /function toggleAssistantWindow\(\) \{[\s\S]*chatbarWindow\.hide\(\);[\s\S]*createAssistantWindow\(\);[\s\S]*\}/
+    );
+    expect(mainSource).toMatch(
+      /function toggleChatbarWindow\(\) \{[\s\S]*assistantWindow\.hide\(\);[\s\S]*createChatbarWindow\(\);[\s\S]*\}/
+    );
+  });
+
   it('starts reflection prepare then opens the screenshot modal immediately', () => {
     const mainSource = readFileSync(path.join(process.cwd(), 'src/main/main.ts'), 'utf8');
 

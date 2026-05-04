@@ -349,7 +349,7 @@ export const ChatBar: React.FC = () => {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={screenshot ? "Ask about this screenshot..." : "Ask Ayati - Quran Desktop Companion anything..."}
+              placeholder={screenshot ? "Ask about this screenshot..." : "Ask Ayati anything"}
               disabled={isLoading}
               className="flex-1 bg-transparent text-base text-white placeholder-neutral-500 outline-none font-medium h-full min-w-0 disabled:opacity-50"
             />

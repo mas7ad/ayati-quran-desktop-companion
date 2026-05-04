@@ -1,21 +1,65 @@
 # Ayati - Quran Desktop Companion
 
-Ayati - Quran Desktop Companion is an Electron desktop companion that turns a screenshot into a Quran-focused reflection. Press the capture shortcut, Ayati - Quran Desktop Companion sends the image to the configured AI provider account, ranks a relevant ayah, retrieves Quran Foundation content, and can save a Quran Foundation bookmark when the user is signed in.
+Ayati - Quran Desktop Companion is an Electron desktop companion that turns a screenshot into a Quran-focused reflection. Press the capture shortcut, Ayati sends the image to the configured AI provider, ranks a relevant ayah, retrieves Quran Foundation content, and can save a Quran Foundation bookmark when the user is signed in.
 
-## AI Provider
+A small animated pet companion lives on your desktop, reacts to your actions, offers idle behaviors, and can remind you about tasks and prayers.
 
-Ayati - Quran Desktop Companion uses the OpenRouter API by default:
+## Features
 
-```bash
-OPENROUTER_API_KEY=your-openrouter-key
-```
+### Quran Reflection System
+- **Screen Capture & Analysis**: Press a global hotkey to capture your screen and get an AI-powered Quran reflection
+- **Ayah Ranking**: AI analyzes your screen context and ranks relevant ayah candidates based on themes (stress, focus, gratitude, patience, work, etc.)
+- **Arabic Text & Translation**: Displays Uthmani Arabic text with configurable translations via Quran Foundation API
+- **Tafsir Integration**: Expand detailed tafsir (exegesis) for any reflection
+- **Audio Recitation**: Play ayah recitation audio from configurable reciters
+- **Alternate Ayahs**: View stronger alternate ayah candidates for the same screen context
+- **Reflection History**: Browse, search, and filter past reflections by theme, status, and feedback
+- **Day Summary**: View daily reflection stats, themes, and saved count
+- **Share Card**: Copy a branded share card with ayah text, translation, and notes to clipboard
 
-The default endpoint is `https://openrouter.ai/api/v1`, and the bundled default model is `google/gemma-4-31b-it:free`.
+### Quran Foundation Integration
+- **OAuth2 Sign-In**: PKCE authorization code flow for secure user authentication
+- **Bookmarks**: Save ayah bookmarks synced to your Quran Foundation account
+- **Personal Notes**: Attach reflection notes to ayahs (local or synced)
+- **Collections**: Create collections and organize saved ayahs
+- **Streak Tracking**: Track and display your Quran reading streak
+- **Activity Recording**: Automatically log Quran activity days
+- **Offline Support**: Local storage with pending sync when offline
 
-Settings also includes direct API account presets:
+### Pet Companion
+- **Animated Sprite Pet**: A small desktop pet with multiple appearance themes (Ayah, Bolt, Cloudlet, Cosmo)
+- **Idle Behaviors**: Blink, look around, snip claws, yawn, wander, stretch, wiggle, wave
+- **Attention Seeking**: Pet can seek attention when idle
+- **Pet Chat**: Click the pet to open a chat bubble with AI-powered responses
+- **Context Menu**: Right-click the pet for quick actions
+- **Tutorial**: First-launch tutorial guides you through pet features
+- **Camera Snap Feedback**: Pet reacts with a camera animation when capturing reflections
 
-| Provider | Base URL | Default model |
+### Prayer Awareness
+- **Prayer Times**: Fetch daily prayer times by city/country via AlAdhan API
+- **Calculation Methods**: 20+ calculation methods (MWL, ISNA, Umm Al-Qura, JAKIM, etc.)
+- **Juristic Schools**: Shafi/Maliki/Hanbali or Hanafi Asr time
+- **Prayer Reminders**: Configurable lead-time reminders before prayer
+- **Quiet Windows**: Suppress nudges during prayer times
+- **Location Presets**: Quick-select cities across 10 countries
+
+### Task Management
+- **Local Todos**: Create tasks with title, notes, priority, due date, and reminders
+- **Pet Reminders**: Pet can remind you about upcoming tasks
+- **Task Completion**: Mark tasks complete or delete them
+
+### Pomodoro Timer
+- **Focus Sessions**: Configurable focus, short break, and long break durations
+- **Session Tracking**: Track completed focus sessions and history
+- **Todo Integration**: Link focus sessions to specific tasks
+- **Pet Reminders**: Pet notifies when sessions complete
+
+### AI Provider Support
+Ayati uses OpenRouter by default but supports multiple AI providers:
+
+| Provider | Base URL | Default Model |
 | --- | --- | --- |
+| OpenRouter | `https://openrouter.ai/api/v1` | `google/gemma-4-31b-it:free` |
 | OpenAI | `https://api.openai.com/v1` | `gpt-5.2` |
 | Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3-flash-preview` |
 | DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
@@ -24,11 +68,52 @@ Settings also includes direct API account presets:
 | Kimi (Moonshot AI) | `https://api.moonshot.ai/v1` | `kimi-k2.5` |
 | GLM (Z.AI) | `https://api.z.ai/api/paas/v4` | `glm-5.1` |
 
-OpenAI-compatible providers append `/chat/completions`; Claude appends `/messages` and uses Anthropic’s `x-api-key` plus `anthropic-version` headers.
+OpenAI-compatible providers append `/chat/completions`; Claude appends `/messages` with Anthropic headers.
+
+### Chat & Assistant
+- **Streaming Chat**: Real-time streaming AI responses in the assistant panel
+- **Screen Analysis**: Ask AI to analyze your current screen
+- **Chat History**: Persistent chat history across sessions
+- **Quick Prompts**: Built-in prompts for Quranic guidance and day summaries
+
+### Workspace Browser
+- **File Navigation**: Browse your Ayati workspace files and directories
+- **File Previews**: Preview markdown, JSON, and image files
+- **Open in System**: Open files/folders in your default system application
+
+### Auto-Updates
+- **Automatic Updates**: Check for and download updates via `electron-updater`
+- **Update Notifications**: Badge indicator in settings when updates are available
+- **Cross-Platform**: Supports macOS, Windows, and Linux update feeds
+
+### Customization
+- **Customizable Hotkeys**: Configure global shortcuts for chat, capture, and assistant
+- **Pet Appearance**: Choose from multiple pet themes
+- **Mushaf Options**: Multiple mushaf scripts (Madani 1421, Indo-Pak Nastaleeq, QPC Nastaleeq, etc.)
+- **Tajweed Support**: Optional tajweed color markup rendering
+- **Translation Selection**: Configurable translation resource
+- **Contextual Nudges**: AI-powered Quran reminders based on your activity
+- **Timed Reminders**: Periodic Quran reflection reminders
+
+### Privacy
+- **No Persistent Screenshots**: Screenshots are cleared after reflection is built
+- **Local History**: Only text summaries, ayah content, themes, timestamps, notes, and sync state are stored locally
+- **Encrypted Tokens**: OAuth tokens encrypted using OS-level secure storage
+- **No Re-translation**: Quran translations and tafsir are displayed as returned by the API
+
+## Keyboard Shortcuts
+
+| Action | Default Shortcut |
+| --- | --- |
+| Open Chat | `Cmd/Ctrl+Alt+,` |
+| Reflect on Screen | `Cmd/Ctrl+Alt+/` |
+| Open Assistant | `Cmd/Ctrl+Alt+.` |
+
+All shortcuts are customizable in Settings.
 
 ## Quran Foundation API Usage
 
-Ayati - Quran Desktop Companion uses the required Quran Foundation API categories:
+Ayati uses the required Quran Foundation API categories:
 
 - **Content API:** `GET {QURAN_CONTENT_API_BASE_URL}/verses/by_key/{verseKey}` with `translations`, `fields=text_uthmani`, and `translation_fields=resource_name` to fetch Arabic text and translation.
 - **Content API:** `GET {QURAN_CONTENT_API_BASE_URL}/tafsirs/{resourceId}/by_ayah/{verseKey}` for tafsir snippets.
@@ -51,10 +136,6 @@ QURAN_CONTENT_API_BASE_URL=https://api.quran.com/api/v4
 
 For production, move token exchange to a backend proxy. Desktop apps cannot truly hide client secrets.
 
-## Privacy
-
-Ayati - Quran Desktop Companion does not persist screenshot images by default. Screenshots are captured for analysis, cleared after the reflection is built, and local history stores only text summaries, ayah content, themes, timestamps, notes, collection IDs, feedback, and sync state. Quran translations and tafsir returned by Quran Foundation are displayed as returned and are not re-translated.
-
 ## Demo Script
 
 1. Open Settings and choose an AI provider account.
@@ -74,41 +155,64 @@ Ayati - Quran Desktop Companion does not persist screenshot images by default. S
 bun install
 bun run test
 bun run build
+bun run dev
 ```
 
-## Packaging macOS
+## Packaging
 
-Build downloadable macOS artifacts with Electron Builder:
+Build downloadable artifacts with Electron Builder:
 
+### macOS
 ```bash
 bun run dist:mac
 ```
 
-The macOS build writes DMG, ZIP, blockmap, and update metadata files into `release/`:
-
+Output files in `release/`:
 - `Ayati - Quran Desktop Companion-<version>.dmg` for Intel Macs.
 - `Ayati - Quran Desktop Companion-<version>-arm64.dmg` for Apple Silicon Macs.
 - Matching `*-mac.zip` files for auto-update feeds.
 - `latest-mac.yml` for `electron-updater`.
 
-For a first local or private test build without code signing or notarization, use:
-
+For a first local or private test build without code signing or notarization:
 ```bash
 bun run dist:mac:unsigned
 ```
 
+### Windows
+```bash
+bun run dist:win
+```
+
+### Linux
+```bash
+bun run dist:linux
+```
+
 Unsigned builds are downloadable, but macOS Gatekeeper will warn users. For public distribution, build on a Mac with an Apple Developer account, a valid Developer ID Application certificate in Keychain, and Apple notarization credentials configured for Electron Builder. Then upload the DMG, ZIP, blockmap, and `latest-mac.yml` files from `release/` to a GitHub Release or another static download host matching the `build.publish.url` setting in `package.json`.
+
+## Project Structure
 
 Runtime code lives under `src/`:
 
-- `src/main/main.ts` - Electron app bootstrap, windows, IPC, screenshot capture, and Ayati - Quran Desktop Companion orchestration.
-- `src/main/clawbot-client.ts` - AI provider client used for chat, streaming, and screenshot analysis.
-- `src/shared/ai-providers.ts` - provider catalog, default endpoints, default models, and protocol metadata.
-- `src/main/quran-foundation-client.ts` - Quran Foundation OAuth, content, and bookmark API client.
-- `src/main/ayah-*.ts` - ayah ranking, fallbacks, reflection history, and screen-scene analysis.
-- `src/renderer/assistant/` - assistant panel with chat, reflections, and settings.
-- `src/renderer/screenshot-question/` - floating screenshot reflection surface.
-- `src/renderer/onboarding/` - first-launch setup.
+- `src/main/main.ts` - Electron app bootstrap, windows, IPC, screenshot capture, and orchestration
+- `src/main/clawbot-client.ts` - AI provider client for chat, streaming, and screenshot analysis
+- `src/shared/ai-providers.ts` - Provider catalog, default endpoints, default models, and protocol metadata
+- `src/main/quran-foundation-client.ts` - Quran Foundation OAuth, content, and bookmark API client
+- `src/main/ayah-*.ts` - Ayah ranking, fallbacks, reflection history, and screen-scene analysis
+- `src/main/pomodoro-store.ts` - Pomodoro timer state and session management
+- `src/main/todo-store.ts` - Local todo CRUD operations
+- `src/main/prayer-*.ts` - Prayer times fetching and prayer-aware reminder logic
+- `src/main/store.ts` - Electron store schema and migration
+- `src/main/hotkeys.ts` - Global hotkey configuration and parsing
+- `src/main/updates.ts` - Auto-update state machine and actions
+- `src/renderer/assistant/` - Assistant panel with chat, prayers, todos, focus, reflections, and settings
+- `src/renderer/screenshot-question/` - Floating screenshot reflection surface
+- `src/renderer/pet/` - Animated pet companion with sprite atlas and tutorial
+- `src/renderer/pet-chat/` - Pet chat bubble window
+- `src/renderer/pet-context-menu/` - Pet right-click context menu
+- `src/renderer/chatbar/` - Quick chat bar
+- `src/renderer/onboarding/` - First-launch setup flow
+- `src/renderer/workspace-browser/` - Workspace file browser
 
 ## License
 

@@ -42,7 +42,7 @@ describe('buildContextualQuranNudge', () => {
 
     expect(result?.message).toMatchObject({
       trigger: 'app_switch',
-      quickReplies: ['Reflect', 'Save', 'Not now'],
+      quickReplies: ['Listen', 'Tafsir', 'Reflect', 'Save', 'Dismiss'],
     });
     expect(result?.message.text).toContain('A fitting reminder');
     expect(result?.message.text).toContain('96:1');
@@ -79,18 +79,19 @@ describe('buildContextualQuranNudge', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null after the daily maximum is reached', async () => {
+  it('still returns a nudge after many contextual reminders the same day', async () => {
     const result = await buildContextualQuranNudge(defaultInput({
       nudgeState: {
         lastShownAt: NOW - 20 * 60 * 1000,
         lastTimedReminderAt: null,
-        shownToday: 8,
+        shownToday: 40,
         shownTodayDate: '2026-04-20',
         recentAppThemeKeys: [],
       },
     }));
 
-    expect(result).toBeNull();
+    expect(result?.message.trigger).toBe('app_switch');
+    expect(result?.nextState.shownToday).toBe(41);
   });
 
   it('suppresses sensitive app and title contexts', async () => {
@@ -205,7 +206,7 @@ describe('buildTimedQuranReminder', () => {
 
     expect(result?.message).toMatchObject({
       trigger: 'timer',
-      quickReplies: ['Reflect', 'Save', 'Not now'],
+      quickReplies: ['Listen', 'Tafsir', 'Reflect', 'Save', 'Dismiss'],
     });
     expect(result?.message.text).toContain('Time for a Quran reminder');
     expect(result?.message.arabicText).toBe(verseContent.arabicText);
@@ -278,6 +279,24 @@ describe('buildTimedQuranReminder', () => {
       nudgeState: {
         lastShownAt: NOW - 20 * 60 * 1000,
         lastTimedReminderAt: NOW - 59 * 60 * 1000,
+        shownToday: 1,
+        shownTodayDate: '2026-04-20',
+        recentAppThemeKeys: [],
+      },
+    }));
+
+    expect(result).toBeNull();
+  });
+
+  it('counts down from the last Quran reminder shown, not only the last timer reminder', async () => {
+    const result = await buildTimedQuranReminder(defaultInput({
+      settings: defaultSettings({
+        timedReminders: true,
+        timedReminderMinutes: 60,
+      }),
+      nudgeState: {
+        lastShownAt: NOW - 10 * 60 * 1000,
+        lastTimedReminderAt: NOW - 2 * 60 * 60 * 1000,
         shownToday: 1,
         shownTodayDate: '2026-04-20',
         recentAppThemeKeys: [],

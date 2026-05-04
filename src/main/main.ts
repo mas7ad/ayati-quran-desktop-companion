@@ -1,3 +1,4 @@
+import { readFile, stat } from 'fs/promises';
 import {
   app,
   BrowserWindow,
@@ -13,6 +14,7 @@ import {
   systemPreferences,
   safeStorage,
   clipboard,
+  protocol,
 } from 'electron';
 import path from 'path';
 import fs from 'fs';
@@ -57,17 +59,31 @@ import type {
   AyahLensSettings,
   AyahLensState,
   AyahReflection,
+  PomodoroSettings,
+  PomodoroSessionKind,
+  PrayerSettings,
   QuranAuthStatus,
   QuranStreakSummary,
   QuranVerseContent,
+  TodoSettings,
 } from './ayah-types';
 import { createPkcePair, QuranFoundationClient, QuranFoundationError, type StoredTokenSet } from './quran-foundation-client';
 import { QURAN_OAUTH_SCOPES } from './quran-oauth-scopes';
 import { resolveQuranClientConfig } from './quran-runtime-config';
+import {
+  coerceQulVerseScriptMushafKey,
+  getQulRenderedVerse,
+  isQulBundleAvailable,
+  parseVerseKeyToSurahAyah,
+  QUL_VERSE_SCRIPT_KEYS,
+} from './qul/bundled-qul-repository';
+import { resolveQulRoot, isFontPathWithinQulRoot } from './qul/qul-paths';
+import { getQulFontPackPresence } from './qul/qul-font-packs';
 import { getDefaultClawBotModel } from './ai-provider-defaults';
 import { DEFAULT_HOTKEYS, sanitizeAccelerator } from './hotkeys';
 import { getAiProviderConfig } from './ai-providers';
 import { getWindowPositionNearAnchor } from './window-positioning';
+import { getAssistantWindowStackingPolicy } from './window-stacking-policy';
 import { enforceSingleInstanceApp } from './single-instance';
 import { selectPreferredWindow } from './window-selection';
 import { shouldHideWindowOnBlur, shouldRevealWindowInactive } from './window-visibility-policy';
@@ -91,6 +107,35 @@ import {
   type DesktopUpdateCheckResult,
   type DesktopUpdateState,
 } from './updates';
+import { fetchPrayerTimesByCity } from './prayer-times-client';
+import {
+  isInsidePrayerQuietWindow,
+  shouldRefreshPrayerDay,
+  shouldSendPrayerReminder,
+} from './prayer-awareness';
+import {
+  createTodo,
+  deleteTodo as deleteTodoItem,
+  getDueTodoReminder,
+  listTodos,
+  setTodoCompleted,
+  updateTodo,
+} from './todo-store';
+import {
+  cancelPomodoroSession,
+  completePomodoroSession,
+  getDuePomodoroCompletion,
+  getNextPomodoroKind,
+  getPomodoroRemainingMs,
+  pausePomodoroSession,
+  resumePomodoroSession,
+  startPomodoroSession,
+} from './pomodoro-store';
+import { formatPomodoroClock, type PomodoroPetOverlayPayload } from '../shared/pomodoro-client';
+import {
+  filterAvailableRecitationResources,
+  selectDefaultRecitationResource,
+} from '../shared/quran-reciter-preferences';
 
 const execFileAsync = promisify(execFile);
 
@@ -107,6 +152,7 @@ app.disableHardwareAcceleration();
 // Windows
 let petWindow: BrowserWindow | null = null;
 let petChatWindow: BrowserWindow | null = null;
+let petPomodoroTimerWindow: BrowserWindow | null = null;
 let assistantWindow: BrowserWindow | null = null;
 let chatbarWindow: BrowserWindow | null = null;
 let screenshotQuestionWindow: BrowserWindow | null = null;
@@ -114,11 +160,14 @@ let onboardingWindow: BrowserWindow | null = null;
 let petContextMenuWindow: BrowserWindow | null = null;
 let workspaceBrowserWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+const DEFAULT_TRAY_TOOLTIP = 'Ayati - Quran Desktop Companion';
 let isChatbarWindowReady = false;
 let shouldRevealChatbarWhenReady = false;
+let shouldRevealAssistantWhenReady = false;
 let pendingPetChatReveal = false;
 let petChatRevealTimeout: NodeJS.Timeout | null = null;
 let petChatAutoHideTimeout: NodeJS.Timeout | null = null;
+let isPetChatAudioPlaying = false;
 let pendingAyahReflectionResult: { reflection?: AyahReflection; error?: string } | null = null;
 /** When set, screenshot modal opened before prepare finished; IPC waits on this so the renderer does not start a second capture. */
 let ayahReflectionPrepareInFlight: Promise<void> | null = null;
@@ -268,7 +317,7 @@ function wireDebugWindowBorder(window: BrowserWindow): void {
 }
 
 function applyDebugWindowBordersToAllWindows(): void {
-  const windows = [petWindow, petChatWindow, assistantWindow, chatbarWindow, screenshotQuestionWindow, onboardingWindow, petContextMenuWindow, workspaceBrowserWindow];
+  const windows = [petWindow, petChatWindow, petPomodoroTimerWindow, assistantWindow, chatbarWindow, screenshotQuestionWindow, onboardingWindow, petContextMenuWindow, workspaceBrowserWindow];
   for (const window of windows) {
     if (!window || window.isDestroyed()) continue;
     void applyDebugWindowBorder(window);
@@ -295,19 +344,45 @@ function getAyahLensState(): AyahLensState {
   }
 
   const defaultState = createDefaultAyahLensState();
+  const mergedPreferences = { ...defaultState.preferences, ...stored.preferences } as AyahLensSettings & { maxNudgesPerDay?: number };
+  const { maxNudgesPerDay: _legacyMaxNudgesPerDay, ...preferences } = mergedPreferences;
+  if (preferences.qulMushafKey === 'madaniTajweed' || preferences.qulMushafKey === 'madani1405') {
+    preferences.qulMushafKey = 'madani1421';
+  }
+
   return {
     ...defaultState,
     ...stored,
     quranConfig: { ...defaultState.quranConfig, ...stored.quranConfig },
     quranAuth: { ...defaultState.quranAuth, ...stored.quranAuth },
     contentAuth: { ...defaultState.contentAuth, ...stored.contentAuth },
-    preferences: { ...defaultState.preferences, ...stored.preferences },
+    preferences,
     reflections: stored.reflections ?? [],
     collections: stored.collections ?? [],
     pendingSync: stored.pendingSync ?? [],
     recentVerseKeys: stored.recentVerseKeys ?? [],
     nudgeState: { ...defaultState.nudgeState, ...stored.nudgeState },
     verseCache: stored.verseCache ?? {},
+    prayer: {
+      ...defaultState.prayer,
+      ...stored.prayer,
+      settings: { ...defaultState.prayer.settings, ...stored.prayer?.settings },
+      sentReminderKeys: stored.prayer?.sentReminderKeys ?? [],
+    },
+    todos: {
+      ...defaultState.todos,
+      ...stored.todos,
+      settings: { ...defaultState.todos.settings, ...stored.todos?.settings },
+      items: stored.todos?.items ?? [],
+      sentReminderIds: stored.todos?.sentReminderIds ?? [],
+    },
+    pomodoro: {
+      ...defaultState.pomodoro,
+      ...stored.pomodoro,
+      settings: { ...defaultState.pomodoro.settings, ...stored.pomodoro?.settings },
+      history: stored.pomodoro?.history ?? [],
+      sentCompletionIds: stored.pomodoro?.sentCompletionIds ?? [],
+    },
   };
 }
 
@@ -557,7 +632,7 @@ async function resolveRecitationResource(): Promise<{ id: number; name?: string 
 
   const accessToken = await getQuranContentAccessToken();
   const resources = await getQuranClient().fetchRecitationResources(accessToken);
-  const preferred = resources.find((resource) => /mishari|mishary|alafasy/i.test(resource.name)) ?? resources[0];
+  const preferred = selectDefaultRecitationResource(resources);
   if (!preferred) return null;
 
   setAyahLensState({
@@ -590,10 +665,10 @@ async function getAyahTafsirById(reflectionId: string): Promise<AyahReflection |
 async function getAyahAudioById(reflectionId: string): Promise<AyahReflection | null> {
   const reflection = getAyahLensState().reflections.find((item) => item.id === reflectionId);
   if (!reflection) return null;
-  if (reflection.audio) return reflection;
 
   const resource = await resolveRecitationResource();
   if (!resource) return reflection;
+  if (reflection.audio?.recitationId === resource.id) return reflection;
 
   const accessToken = await getQuranContentAccessToken();
   const audio = await getQuranClient().fetchAyahAudio(accessToken, reflection.verseKey, resource.id, resource.name);
@@ -969,8 +1044,6 @@ function updateAyahLensSetting(key: string, value: unknown): AyahLensSettings {
     preferences.contextualNudges = value;
   } else if (key === 'nudgeCooldownMinutes' && typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 240) {
     preferences.nudgeCooldownMinutes = value;
-  } else if (key === 'maxNudgesPerDay' && typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 48) {
-    preferences.maxNudgesPerDay = value;
   } else if (key === 'timedReminders' && typeof value === 'boolean') {
     preferences.timedReminders = value;
   } else if (key === 'timedReminderMinutes' && typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1440) {
@@ -983,6 +1056,12 @@ function updateAyahLensSetting(key: string, value: unknown): AyahLensSettings {
     preferences.recitationId = value;
   } else if (key === 'reciterName' && (value === null || typeof value === 'string')) {
     preferences.reciterName = value;
+  } else if (key === 'qulArabicEnabled' && typeof value === 'boolean') {
+    preferences.qulArabicEnabled = value;
+  } else if (key === 'qulTajweedEnabled' && typeof value === 'boolean') {
+    preferences.qulTajweedEnabled = value;
+  } else if (key === 'qulMushafKey' && typeof value === 'string' && new Set(QUL_VERSE_SCRIPT_KEYS).has(value as (typeof QUL_VERSE_SCRIPT_KEYS)[number])) {
+    preferences.qulMushafKey = value;
   } else {
     throw new Error('Unknown or invalid Ayati - Quran Desktop Companion setting.');
   }
@@ -991,16 +1070,130 @@ function updateAyahLensSetting(key: string, value: unknown): AyahLensSettings {
   return preferences;
 }
 
+function sanitizeNumberSetting(value: unknown, fallback: number, min: number, max: number): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max ? value : fallback;
+}
+
+function updatePrayerSettings(patch: Partial<PrayerSettings>): PrayerSettings {
+  const state = getAyahLensState();
+  const current = state.prayer.settings;
+  const nextSettings: PrayerSettings = {
+    enabled: typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled,
+    city: typeof patch.city === 'string' ? patch.city.trim().slice(0, 120) : current.city,
+    country: typeof patch.country === 'string' ? patch.country.trim().slice(0, 120) : current.country,
+    method: sanitizeNumberSetting(patch.method, current.method, 1, 99),
+    school: patch.school === 1 ? 1 : patch.school === 0 ? 0 : current.school,
+    reminderLeadMinutes: sanitizeNumberSetting(patch.reminderLeadMinutes, current.reminderLeadMinutes, 0, 120),
+    quietMinutesAfterPrayer: sanitizeNumberSetting(patch.quietMinutesAfterPrayer, current.quietMinutesAfterPrayer, 0, 120),
+    hasSavedSettings: typeof patch.hasSavedSettings === 'boolean' ? patch.hasSavedSettings : current.hasSavedSettings,
+  };
+  const shouldClearToday =
+    nextSettings.city !== current.city
+    || nextSettings.country !== current.country
+    || nextSettings.method !== current.method
+    || nextSettings.school !== current.school;
+  const nextState = {
+    ...state,
+    prayer: {
+      ...state.prayer,
+      settings: nextSettings,
+      today: shouldClearToday ? null : state.prayer.today,
+      tomorrow: shouldClearToday ? null : state.prayer.tomorrow,
+    },
+  };
+  setAyahLensState(nextState);
+  return nextSettings;
+}
+
+function updateTodoSettings(patch: Partial<TodoSettings>): TodoSettings {
+  const state = getAyahLensState();
+  const settings = {
+    ...state.todos.settings,
+    petRemindersEnabled: typeof patch.petRemindersEnabled === 'boolean'
+      ? patch.petRemindersEnabled
+      : state.todos.settings.petRemindersEnabled,
+  };
+  setAyahLensState({ ...state, todos: { ...state.todos, settings } });
+  return settings;
+}
+
+function updatePomodoroSettings(patch: Partial<PomodoroSettings>): PomodoroSettings {
+  const state = getAyahLensState();
+  const current = state.pomodoro.settings;
+  const settings: PomodoroSettings = {
+    focusMinutes: sanitizeNumberSetting(patch.focusMinutes, current.focusMinutes, 1, 240),
+    shortBreakMinutes: sanitizeNumberSetting(patch.shortBreakMinutes, current.shortBreakMinutes, 1, 120),
+    longBreakMinutes: sanitizeNumberSetting(patch.longBreakMinutes, current.longBreakMinutes, 1, 120),
+    sessionsUntilLongBreak: sanitizeNumberSetting(patch.sessionsUntilLongBreak, current.sessionsUntilLongBreak, 1, 12),
+    petRemindersEnabled: typeof patch.petRemindersEnabled === 'boolean' ? patch.petRemindersEnabled : current.petRemindersEnabled,
+  };
+  setAyahLensState({ ...state, pomodoro: { ...state.pomodoro, settings } });
+  updateTrayPomodoroTooltip();
+  return settings;
+}
+
+async function refreshPrayerTimes(): Promise<AyahLensState['prayer']['today']> {
+  const state = getAyahLensState();
+  const { settings, today, tomorrow: previousTomorrow } = state.prayer;
+  if (!settings.city.trim() || !settings.country.trim()) return today;
+
+  const timezone = getUserTimezone() ?? 'UTC';
+  const todayDate = new Date();
+  const tomorrowDate = new Date(
+    todayDate.getFullYear(),
+    todayDate.getMonth(),
+    todayDate.getDate() + 1,
+  );
+
+  try {
+    const [fetchedToday, fetchedTomorrow] = await Promise.all([
+      fetchPrayerTimesByCity({
+        city: settings.city,
+        country: settings.country,
+        method: settings.method,
+        school: settings.school,
+        date: todayDate,
+        timezone,
+      }),
+      fetchPrayerTimesByCity({
+        city: settings.city,
+        country: settings.country,
+        method: settings.method,
+        school: settings.school,
+        date: tomorrowDate,
+        timezone,
+      }),
+    ]);
+    setAyahLensState({
+      ...getAyahLensState(),
+      prayer: { ...getAyahLensState().prayer, today: fetchedToday, tomorrow: fetchedTomorrow },
+    });
+    return fetchedToday;
+  } catch (error) {
+    const staleDay = today ? { ...today, error: getSafeErrorMessage(error) } : null;
+    setAyahLensState({
+      ...state,
+      prayer: { ...state.prayer, today: staleDay, tomorrow: previousTomorrow },
+    });
+    if (staleDay) return staleDay;
+    throw error;
+  }
+}
+
 // Idle detection state
 let lastActivityTime = Date.now();
 let idleCheckInterval: NodeJS.Timeout | null = null;
 let timedQuranReminderInterval: NodeJS.Timeout | null = null;
+let prayerAwarenessInterval: NodeJS.Timeout | null = null;
+let todoReminderInterval: NodeJS.Timeout | null = null;
+let pomodoroInterval: NodeJS.Timeout | null = null;
 let isCapturingAyahReflection = false;
 const IDLE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
 const DEFAULT_TIMED_QURAN_REMINDER_MINUTES = 15;
 
 // Pet movement animation state
 let moveAnimation: NodeJS.Timeout | null = null;
+let workspaceRestackTimeout: NodeJS.Timeout | null = null;
 
 // Pet window size constants
 // Minimum 162px to avoid Electron transparency bug on external/4K displays
@@ -1009,14 +1202,145 @@ const PET_WINDOW_HEIGHT = 164;
 const PET_WINDOW_TUTORIAL_WIDTH = 320;
 const PET_WINDOW_TUTORIAL_HEIGHT = 350;
 const PET_WAKE_FLIGHT_DURATION_MS = 1100;
-const PET_CHAT_MIN_WIDTH = 220;
-const PET_CHAT_MAX_WIDTH = 360;
+const PET_CHAT_MIN_WIDTH = 280;
+const PET_CHAT_MAX_WIDTH = 420;
 const PET_CHAT_MIN_HEIGHT = 90;
 const PET_CHAT_MAX_HEIGHT = 420;
 const PET_CHAT_AUTO_HIDE_MS = 10000;
 const PET_CHAT_VERTICAL_GAP = -2;
+const POMODORO_TIMER_WINDOW_WIDTH = 108;
+const POMODORO_TIMER_WINDOW_HEIGHT = 54;
+const POMODORO_TIMER_VERTICAL_GAP = 8;
+/** Space between Pomodoro timer top and bottom edge of pet-anchored panels when the timer is visible. */
+const ASSISTANT_CLEAR_ABOVE_TIMER_PX = 4;
+
+/**
+ * macOS `setAlwaysOnTop` levels: pet lowest, Pomodoro timer above pet, assistant/chat/screenshot/chatbar at `pop-up-menu`.
+ * Workspace + pet context use `screen-saver` so the workspace stays above those HTML windows (relative ordering within
+ * `pop-up-menu` was not reliable after assistant `setPosition` / clamp). Pet context uses a higher relative than workspace.
+ * Pet-anchored panels use a larger vertical gap when the Pomodoro timer strip is visible (no vertical overlap).
+ * Non-macOS: `elevateWorkspaceBrowserAboveCompanionWindows()` uses `moveTop` after other companion windows show.
+ */
+const MAC_AOT_PET_LEVEL = 'floating' as const;
+const MAC_AOT_POMODORO_TIMER_LEVEL = 'modal-panel' as const;
+const MAC_AOT_COMPANION_POPUP_LEVEL = 'pop-up-menu' as const;
+/** Same Electron `pop-up-menu` tier: assistant, pet chat, screenshot, chatbar (macOS relative ordering). */
+const MAC_AOT_COMPANION_PANEL_RELATIVE_LEVEL = 0;
+/** macOS NSWindow level above `pop-up-menu` — workspace + pet menu only (see `setWorkspaceBrowserWindowAlwaysOnTop`). */
+const MAC_AOT_SCREEN_SAVER_LEVEL = 'screen-saver' as const;
+const MAC_AOT_WORKSPACE_SS_RELATIVE = 0;
+const MAC_AOT_PET_CONTEXT_MENU_SS_RELATIVE = 10;
+
+function setCompanionWindowAlwaysOnTop(
+  window: BrowserWindow,
+  level: typeof MAC_AOT_PET_LEVEL | typeof MAC_AOT_POMODORO_TIMER_LEVEL | typeof MAC_AOT_COMPANION_POPUP_LEVEL,
+  relativeLevel?: number,
+): void {
+  if (process.platform !== 'darwin') {
+    window.setAlwaysOnTop(true);
+    return;
+  }
+  if (typeof relativeLevel === 'number') {
+    window.setAlwaysOnTop(true, level, relativeLevel);
+  } else {
+    window.setAlwaysOnTop(true, level);
+  }
+}
+
+/** Workspace browser: macOS `screen-saver` tier so it stays above assistant/chat (all `pop-up-menu`). */
+function setWorkspaceBrowserWindowAlwaysOnTop(window: BrowserWindow): void {
+  if (process.platform !== 'darwin') {
+    window.setAlwaysOnTop(true);
+    return;
+  }
+  window.setAlwaysOnTop(true, MAC_AOT_SCREEN_SAVER_LEVEL, MAC_AOT_WORKSPACE_SS_RELATIVE);
+}
+
+/** Pet context menu: same tier as workspace but higher relative so it stays clickable over the workspace. */
+function setPetContextMenuWindowAlwaysOnTop(window: BrowserWindow): void {
+  if (process.platform !== 'darwin') {
+    window.setAlwaysOnTop(true);
+    return;
+  }
+  window.setAlwaysOnTop(true, MAC_AOT_SCREEN_SAVER_LEVEL, MAC_AOT_PET_CONTEXT_MENU_SS_RELATIVE);
+}
+
+function hasLiveWorkspaceBrowserWindow(): boolean {
+  return workspaceBrowserWindow !== null && !workspaceBrowserWindow.isDestroyed();
+}
+
+function applyAssistantWindowStacking(): void {
+  if (!assistantWindow || assistantWindow.isDestroyed()) return;
+
+  const policy = getAssistantWindowStackingPolicy({
+    hasWorkspaceBrowser: hasLiveWorkspaceBrowserWindow(),
+  });
+  if (!policy.isAlwaysOnTop) {
+    assistantWindow.setAlwaysOnTop(false);
+    return;
+  }
+
+  setCompanionWindowAlwaysOnTop(
+    assistantWindow,
+    MAC_AOT_COMPANION_POPUP_LEVEL,
+    MAC_AOT_COMPANION_PANEL_RELATIVE_LEVEL,
+  );
+}
+
+function shouldRepositionAssistantAfterReveal(): boolean {
+  return getAssistantWindowStackingPolicy({
+    hasWorkspaceBrowser: hasLiveWorkspaceBrowserWindow(),
+  }).shouldRepositionAfterReveal;
+}
+
+function shouldRevealAssistantInactive(): boolean {
+  const policy = getAssistantWindowStackingPolicy({
+    hasWorkspaceBrowser: hasLiveWorkspaceBrowserWindow(),
+  });
+  return policy.shouldRevealInactive || shouldRevealWindowInactive('assistant');
+}
+
+/**
+ * After another companion `BrowserWindow` is shown or moved, keep the workspace browser above it.
+ * macOS: re-apply `setAlwaysOnTop` + `moveTop` (assistant `setPosition`/`show` can reorder above workspace otherwise).
+ * Windows/Linux: `setAlwaysOnTop(true)` + `moveTop` (relative levels are not ordered reliably).
+ */
+function elevateWorkspaceBrowserAboveCompanionWindows(): void {
+  if (!workspaceBrowserWindow || workspaceBrowserWindow.isDestroyed()) {
+    return;
+  }
+  applyAssistantWindowStacking();
+  try {
+    if (process.platform === 'darwin') {
+      setWorkspaceBrowserWindowAlwaysOnTop(workspaceBrowserWindow);
+    } else {
+      workspaceBrowserWindow.setAlwaysOnTop(true);
+    }
+    workspaceBrowserWindow.moveTop();
+  } catch {
+    // ignore
+  }
+
+  if (workspaceRestackTimeout) return;
+  workspaceRestackTimeout = setTimeout(() => {
+    workspaceRestackTimeout = null;
+    if (!workspaceBrowserWindow || workspaceBrowserWindow.isDestroyed()) return;
+    try {
+      if (process.platform === 'darwin') {
+        setWorkspaceBrowserWindowAlwaysOnTop(workspaceBrowserWindow);
+      } else {
+        workspaceBrowserWindow.setAlwaysOnTop(true);
+      }
+      workspaceBrowserWindow.moveTop();
+    } catch {
+      // ignore
+    }
+  }, 0);
+}
+
 const ASSISTANT_VERTICAL_GAP = -3;
 const WORKSPACE_BROWSER_VERTICAL_GAP = -6;
+const WORKSPACE_ASSISTANT_AVOID_GAP = 12;
 const PET_CONTEXT_MENU_WIDTH = 220;
 const PET_CONTEXT_MENU_HEIGHT = 342;
 const ASSISTANT_WINDOW_WIDTH = 400;
@@ -1458,9 +1782,10 @@ function animateMoveTo(targetX: number, targetY: number, duration: number = 1000
 
     const [startX, startY] = petWindow.getPosition();
     const startTime = Date.now();
+    const walkDirection: 'left' | 'right' = targetX < startX ? 'left' : 'right';
 
     // Notify renderer that movement started
-    petWindow.webContents.send('pet-moving', { moving: true });
+    petWindow.webContents.send('pet-moving', { moving: true, direction: walkDirection });
 
     moveAnimation = setInterval(() => {
       const elapsed = Date.now() - startTime;
@@ -1474,9 +1799,10 @@ function animateMoveTo(targetX: number, targetY: number, duration: number = 1000
 
       petWindow?.setPosition(currentX, currentY);
       updatePetChatPosition();
+      updatePetPomodoroTimerPosition();
+      updateWorkspaceBrowserPosition();
       updateAssistantPosition();
       updateScreenshotQuestionPosition();
-      updateWorkspaceBrowserPosition();
 
       if (progress >= 1) {
         clearInterval(moveAnimation!);
@@ -1485,6 +1811,7 @@ function animateMoveTo(targetX: number, targetY: number, duration: number = 1000
         petWindow?.webContents.send('pet-moving', { moving: false });
         updateScreenshotQuestionPosition();
         updateWorkspaceBrowserPosition();
+        updatePetPomodoroTimerPosition();
         resolve();
       }
     }, 16); // ~60fps
@@ -1508,21 +1835,26 @@ function getPetWakeFlightOffset(progress: number): { x: number; y: number } {
   return { x: 0, y: 0 };
 }
 
-function clampPetWindowPosition(x: number, y: number): { x: number; y: number } {
-  if (!petWindow || petWindow.isDestroyed()) return { x, y };
-
-  const bounds = petWindow.getBounds();
+/** Keep a pet-sized frame fully inside the nearest display work area (e.g. after monitor layout changes). */
+function clampPetFrameToVisibleWorkArea(x: number, y: number, width: number, height: number): { x: number; y: number } {
   const display = screen.getDisplayNearestPoint({
-    x: Math.round(x + bounds.width / 2),
-    y: Math.round(y + bounds.height / 2),
+    x: Math.round(x + width / 2),
+    y: Math.round(y + height / 2),
   });
-  const maxX = display.workArea.x + display.workArea.width - bounds.width;
-  const maxY = display.workArea.y + display.workArea.height - bounds.height;
+  const maxX = display.workArea.x + display.workArea.width - width;
+  const maxY = display.workArea.y + display.workArea.height - height;
 
   return {
     x: Math.max(display.workArea.x, Math.min(Math.round(x), maxX)),
     y: Math.max(display.workArea.y, Math.min(Math.round(y), maxY)),
   };
+}
+
+function clampPetWindowPosition(x: number, y: number): { x: number; y: number } {
+  if (!petWindow || petWindow.isDestroyed()) return { x, y };
+
+  const bounds = petWindow.getBounds();
+  return clampPetFrameToVisibleWorkArea(x, y, bounds.width, bounds.height);
 }
 
 function animatePetWindowWakeFlight(): Promise<void> {
@@ -1560,18 +1892,20 @@ function animatePetWindowWakeFlight(): Promise<void> {
 
       petWindow.setPosition(nextPosition.x, nextPosition.y);
       updatePetChatPosition();
+      updatePetPomodoroTimerPosition();
+      updateWorkspaceBrowserPosition();
       updateAssistantPosition();
       updateScreenshotQuestionPosition();
-      updateWorkspaceBrowserPosition();
 
       if (progress >= 1) {
         clearInterval(moveAnimation!);
         moveAnimation = null;
         store.set('pet.position', { x: startX, y: startY });
         updatePetChatPosition();
+        updatePetPomodoroTimerPosition();
+        updateWorkspaceBrowserPosition();
         updateAssistantPosition();
         updateScreenshotQuestionPosition();
-        updateWorkspaceBrowserPosition();
         resolve();
       }
     }, 16);
@@ -2100,6 +2434,13 @@ async function maybeSendContextualQuranNudge(
   }
 
   const state = getAyahLensState();
+  if (!options.force && isInsidePrayerQuietWindow({
+    day: state.prayer.today,
+    settings: state.prayer.settings,
+    now: Date.now(),
+  })) {
+    return false;
+  }
   let result: Awaited<ReturnType<typeof buildContextualQuranNudge>>;
   try {
     result = await buildContextualQuranNudge({
@@ -2149,11 +2490,18 @@ async function maybeSendTimedQuranReminder(options: { force?: boolean } = {}): P
   const petChatDemoOpts = options.force ? { bypassTutorial: true as const } : undefined;
 
   const state = getAyahLensState();
+  if (!options.force && isInsidePrayerQuietWindow({
+    day: state.prayer.today,
+    settings: state.prayer.settings,
+    now: Date.now(),
+  })) {
+    return false;
+  }
   const reminderSettings = options.force
     ? { ...state.preferences, timedReminders: true }
     : state.preferences;
   const reminderNudgeState = options.force
-    ? { ...state.nudgeState, lastTimedReminderAt: null }
+    ? { ...state.nudgeState, lastShownAt: null, lastTimedReminderAt: null }
     : state.nudgeState;
   let result: Awaited<ReturnType<typeof buildTimedQuranReminder>>;
   try {
@@ -2212,6 +2560,281 @@ function scheduleTimedQuranReminders(): void {
   timedQuranReminderInterval.unref?.();
 }
 
+async function maybeSendPrayerReminder(): Promise<boolean> {
+  if (!petWindow || tutorialManager?.getStatus().isActive || isCapturingAyahReflection || hasActiveConversationSurface()) {
+    return false;
+  }
+
+  const now = Date.now();
+  let state = getAyahLensState();
+  if (shouldRefreshPrayerDay(state.prayer.today, state.prayer.tomorrow, state.prayer.settings, now)) {
+    try {
+      await refreshPrayerTimes();
+      state = getAyahLensState();
+    } catch {
+      return false;
+    }
+  }
+
+  if (!state.prayer.today) return false;
+  const reminder = shouldSendPrayerReminder({
+    day: state.prayer.today,
+    tomorrow: state.prayer.tomorrow,
+    settings: state.prayer.settings,
+    sentReminderKeys: state.prayer.sentReminderKeys,
+    now,
+  });
+  if (!reminder.shouldSend || !reminder.prayer || !reminder.reminderKey) return false;
+
+  setAyahLensState({
+    ...state,
+    prayer: {
+      ...state.prayer,
+      sentReminderKeys: [...state.prayer.sentReminderKeys, reminder.reminderKey].slice(-80),
+    },
+  });
+  showPetChat({
+    id: randomUUID(),
+    text: `${reminder.prayer.label} is coming up at ${reminder.prayer.time}. Take a moment to prepare.`,
+    quickReplies: ['Got it', 'Open Prayers', 'Not now'],
+  });
+  return true;
+}
+
+function maybeSendTodoReminder(): boolean {
+  if (!petWindow || tutorialManager?.getStatus().isActive || isCapturingAyahReflection || hasActiveConversationSurface()) {
+    return false;
+  }
+  const state = getAyahLensState();
+  const item = getDueTodoReminder(state.todos, Date.now());
+  if (!item) return false;
+
+  setAyahLensState({
+    ...state,
+    todos: {
+      ...state.todos,
+      sentReminderIds: [...state.todos.sentReminderIds, item.id].slice(-200),
+    },
+  });
+  showPetChat({
+    id: randomUUID(),
+    text: `Task reminder: ${item.title}`,
+    quickReplies: ['Done', 'Open To Do', 'Not now'],
+  });
+  return true;
+}
+
+function maybeCompletePomodoro(): boolean {
+  const state = getAyahLensState();
+  const dueSession = getDuePomodoroCompletion(state.pomodoro, Date.now());
+  if (!dueSession) return false;
+
+  const completedPomodoro = completePomodoroSession(state.pomodoro, Date.now());
+  const shouldAnnounce = completedPomodoro.settings.petRemindersEnabled
+    && !completedPomodoro.sentCompletionIds.includes(dueSession.id)
+    && !tutorialManager?.getStatus().isActive
+    && !isCapturingAyahReflection;
+  setAyahLensState({
+    ...state,
+    pomodoro: {
+      ...completedPomodoro,
+      sentCompletionIds: [...completedPomodoro.sentCompletionIds, dueSession.id].slice(-200),
+    },
+  });
+  updateTrayPomodoroTooltip();
+
+  if (shouldAnnounce && petWindow && !(assistantWindow && !assistantWindow.isDestroyed() && assistantWindow.isVisible())) {
+    showPetChat({
+      id: randomUUID(),
+      text: dueSession.kind === 'focus'
+        ? 'Focus session complete. Log the win and take a break when you are ready.'
+        : 'Break complete. Start another focus session when you are ready.',
+      quickReplies: dueSession.kind === 'focus'
+        ? ['Start Break', 'Open Focus', 'Not now']
+        : ['Start Focus', 'Open Focus', 'Not now'],
+    });
+  }
+  return true;
+}
+
+function pomodoroSessionKindLabel(kind: PomodoroSessionKind): string {
+  if (kind === 'shortBreak') return 'Short break';
+  if (kind === 'longBreak') return 'Long break';
+  return 'Focus';
+}
+
+function buildPomodoroPetOverlayPayload(): PomodoroPetOverlayPayload | null {
+  const pomodoro = getAyahLensState().pomodoro;
+  const session = pomodoro.activeSession;
+  const remainingMs = getPomodoroRemainingMs(pomodoro, Date.now());
+  if (
+    session
+    && (session.status === 'running' || session.status === 'paused')
+    && remainingMs !== null
+  ) {
+    return { remainingMs, kind: session.kind, status: session.status };
+  }
+  return null;
+}
+
+/**
+ * `getWindowPositionNearAnchor` uses y = petY - height + gap; panel bottom = petY + gap.
+ * When the Pomodoro timer strip is visible above the pet, use a gap that pulls the panel up so its bottom
+ * sits above the timer (vertical layout), not overlapping the timer window.
+ */
+function verticalGapAbovePetClearingPomodoroTimer(baseGap: number): number {
+  if (!buildPomodoroPetOverlayPayload()) return baseGap;
+  const maxBottomGap = -(POMODORO_TIMER_WINDOW_HEIGHT + POMODORO_TIMER_VERTICAL_GAP + ASSISTANT_CLEAR_ABOVE_TIMER_PX);
+  return Math.min(baseGap, maxBottomGap);
+}
+
+function computePetPomodoroTimerPosition(): { x: number; y: number } | null {
+  if (!petWindow || petWindow.isDestroyed()) return null;
+  const [petX, petY] = petWindow.getPosition();
+  const [petWidth] = petWindow.getSize();
+  const timerX = petX + (petWidth - POMODORO_TIMER_WINDOW_WIDTH) / 2;
+  const timerY = petY - POMODORO_TIMER_WINDOW_HEIGHT - POMODORO_TIMER_VERTICAL_GAP;
+  return {
+    x: Math.max(0, Math.round(timerX)),
+    y: Math.max(0, Math.round(timerY)),
+  };
+}
+
+function updatePetPomodoroTimerPosition(): void {
+  if (!petPomodoroTimerWindow || petPomodoroTimerWindow.isDestroyed()) return;
+  const pos = computePetPomodoroTimerPosition();
+  if (!pos) return;
+  petPomodoroTimerWindow.setPosition(pos.x, pos.y);
+}
+
+function deliverPomodoroTimerPayload(w: BrowserWindow, payload: PomodoroPetOverlayPayload | null): void {
+  const run = () => {
+    if (w.isDestroyed()) return;
+    w.webContents.send('pomodoro-overlay-update', payload);
+    if (payload) {
+      w.showInactive();
+    } else {
+      w.hide();
+    }
+  };
+  if (w.webContents.isLoading()) {
+    w.webContents.once('did-finish-load', run);
+  } else {
+    run();
+  }
+}
+
+function ensurePetPomodoroTimerWindow(): BrowserWindow | null {
+  if (!petWindow || petWindow.isDestroyed()) return null;
+  if (petPomodoroTimerWindow && !petPomodoroTimerWindow.isDestroyed()) return petPomodoroTimerWindow;
+
+  const pos = computePetPomodoroTimerPosition();
+  if (!pos) return null;
+
+  petPomodoroTimerWindow = new BrowserWindow({
+    width: POMODORO_TIMER_WINDOW_WIDTH,
+    height: POMODORO_TIMER_WINDOW_HEIGHT,
+    x: pos.x,
+    y: pos.y,
+    show: false,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#14141a',
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    hasShadow: true,
+    roundedCorners: true,
+    focusable: false,
+    icon: getAppIconPath(),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  wireDebugWindowBorder(petPomodoroTimerWindow);
+  petPomodoroTimerWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  setCompanionWindowAlwaysOnTop(petPomodoroTimerWindow, MAC_AOT_POMODORO_TIMER_LEVEL);
+
+  if (isDev) {
+    petPomodoroTimerWindow.loadURL(`http://localhost:${DEV_PORT}/pomodoro-timer.html`);
+  } else {
+    petPomodoroTimerWindow.loadFile(path.join(__dirname, '../renderer/pomodoro-timer.html'));
+  }
+
+  petPomodoroTimerWindow.on('closed', () => {
+    petPomodoroTimerWindow = null;
+  });
+
+  return petPomodoroTimerWindow;
+}
+
+function pushPomodoroOverlayToTimerWindow(): void {
+  const payload = buildPomodoroPetOverlayPayload();
+  if (!payload) {
+    if (petPomodoroTimerWindow && !petPomodoroTimerWindow.isDestroyed()) {
+      deliverPomodoroTimerPayload(petPomodoroTimerWindow, null);
+    }
+    refreshPetAnchoredPanelsForPomodoroLayout();
+    return;
+  }
+  if (!petWindow || petWindow.isDestroyed()) return;
+  const w = ensurePetPomodoroTimerWindow();
+  if (!w) return;
+  updatePetPomodoroTimerPosition();
+  deliverPomodoroTimerPayload(w, payload);
+  refreshPetAnchoredPanelsForPomodoroLayout();
+}
+
+/** Live Pomodoro countdown in the tray tooltip while a session is running or paused (visible when the assistant is hidden). */
+function updateTrayPomodoroTooltip(): void {
+  if (tray) {
+    const pomodoro = getAyahLensState().pomodoro;
+    const session = pomodoro.activeSession;
+    const remainingMs = getPomodoroRemainingMs(pomodoro, Date.now());
+    if (
+      session
+      && (session.status === 'running' || session.status === 'paused')
+      && remainingMs !== null
+    ) {
+      const clock = formatPomodoroClock(remainingMs);
+      const kind = pomodoroSessionKindLabel(session.kind);
+      const statusText = session.status === 'paused' ? 'Paused' : 'Running';
+      tray.setToolTip(`${DEFAULT_TRAY_TOOLTIP}\nPomodoro ${clock} · ${kind} · ${statusText}`);
+    } else {
+      tray.setToolTip(DEFAULT_TRAY_TOOLTIP);
+    }
+  }
+  pushPomodoroOverlayToTimerWindow();
+}
+
+function schedulePrayerAwareness(): void {
+  if (prayerAwarenessInterval) clearInterval(prayerAwarenessInterval);
+  prayerAwarenessInterval = setInterval(() => {
+    void maybeSendPrayerReminder();
+  }, 60 * 1000);
+  prayerAwarenessInterval.unref?.();
+}
+
+function scheduleTodoReminders(): void {
+  if (todoReminderInterval) clearInterval(todoReminderInterval);
+  todoReminderInterval = setInterval(() => {
+    maybeSendTodoReminder();
+  }, 60 * 1000);
+  todoReminderInterval.unref?.();
+}
+
+function schedulePomodoroTicker(): void {
+  if (pomodoroInterval) clearInterval(pomodoroInterval);
+  pomodoroInterval = setInterval(() => {
+    maybeCompletePomodoro();
+    updateTrayPomodoroTooltip();
+  }, 1000);
+  pomodoroInterval.unref?.();
+  updateTrayPomodoroTooltip();
+}
+
 // Start idle detection
 function startIdleDetection() {
   idleCheckInterval = setInterval(() => {
@@ -2251,6 +2874,7 @@ function expandPetWindowForTutorial(): void {
   petWindow.setPosition(Math.round(safeX), Math.round(safeY));
   updateScreenshotQuestionPosition();
   updateWorkspaceBrowserPosition();
+  updatePetPomodoroTimerPosition();
   petWindow.webContents.send('tutorial-window-expanded', true);
   console.log('[Tutorial] Pet window expanded for tutorial');
 }
@@ -2269,21 +2893,27 @@ function contractPetWindow(): void {
   petWindow.setPosition(Math.round(newX), Math.round(newY));
   updateScreenshotQuestionPosition();
   updateWorkspaceBrowserPosition();
+  updatePetPomodoroTimerPosition();
   petWindow.webContents.send('tutorial-window-expanded', false);
   console.log('[Tutorial] Pet window contracted to normal');
 }
 
 function createPetWindow() {
-  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+  const primary = screen.getPrimaryDisplay();
+  const { workArea } = primary;
 
   // Small window just for the lobster
   const petWindowWidth = PET_WINDOW_WIDTH;
   const petWindowHeight = PET_WINDOW_HEIGHT;
 
-  // Use saved position or default to bottom-right
+  // Use saved position or default to bottom-right of primary work area; clamp so the pet is never stranded off-screen
   const savedPosition = store.get('pet.position') as { x: number; y: number } | null;
-  const startX = savedPosition ? savedPosition.x : screenWidth - petWindowWidth - 20;
-  const startY = savedPosition ? savedPosition.y : screenHeight - petWindowHeight - 20;
+  const rawX = savedPosition ? savedPosition.x : workArea.x + workArea.width - petWindowWidth - 20;
+  const rawY = savedPosition ? savedPosition.y : workArea.y + workArea.height - petWindowHeight - 20;
+  const { x: startX, y: startY } = clampPetFrameToVisibleWorkArea(rawX, rawY, petWindowWidth, petWindowHeight);
+  if (savedPosition && (savedPosition.x !== startX || savedPosition.y !== startY)) {
+    store.set('pet.position', { x: startX, y: startY });
+  }
 
   petWindow = new BrowserWindow({
     width: petWindowWidth,
@@ -2307,9 +2937,9 @@ function createPetWindow() {
   });
   wireDebugWindowBorder(petWindow);
 
-  // Allow dragging and going above menu bar
+  // Allow dragging and going above menu bar; stay below Pomodoro timer and other companion popups (macOS levels).
   petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  petWindow.setAlwaysOnTop(true, 'screen-saver');
+  setCompanionWindowAlwaysOnTop(petWindow, MAC_AOT_PET_LEVEL);
 
   if (isDev) {
     petWindow.loadURL(`http://localhost:${DEV_PORT}/pet.html`);
@@ -2321,6 +2951,7 @@ function createPetWindow() {
     petWindow = null;
     // Also close the chat window when pet is closed
     petChatWindow?.close();
+    petPomodoroTimerWindow?.close();
     petContextMenuWindow?.close();
     workspaceBrowserWindow?.close();
   });
@@ -2328,6 +2959,14 @@ function createPetWindow() {
 
 // Show chat popup above the pet
 function schedulePetChatAutoHide() {
+  if (isPetChatAudioPlaying) {
+    if (petChatAutoHideTimeout) {
+      clearTimeout(petChatAutoHideTimeout);
+      petChatAutoHideTimeout = null;
+    }
+    return;
+  }
+
   if (petChatAutoHideTimeout) {
     clearTimeout(petChatAutoHideTimeout);
   }
@@ -2345,6 +2984,7 @@ function showPetChat(
     text: string;
     quickReplies?: string[];
     reflectionId?: string;
+    verseKey?: string;
     arabicText?: string;
     footerText?: string;
   },
@@ -2354,6 +2994,7 @@ function showPetChat(
 
   // Don't show chat popups during tutorial (dev forced reminders may bypass for demos)
   if (!options.bypassTutorial && tutorialManager?.getStatus().isActive) return;
+  isPetChatAudioPlaying = false;
   pendingPetChatReveal = true;
 
   const [petX, petY] = petWindow.getPosition();
@@ -2362,7 +3003,7 @@ function showPetChat(
   const chatWidth = PET_CHAT_MIN_WIDTH;
   const chatHeight = PET_CHAT_MIN_HEIGHT;
   const chatX = petX + (petWidth - chatWidth) / 2;
-  const chatY = petY - chatHeight + PET_CHAT_VERTICAL_GAP;
+  const chatY = petY - chatHeight + verticalGapAbovePetClearingPomodoroTimer(PET_CHAT_VERTICAL_GAP);
 
   const scheduleFallbackReveal = () => {
     if (petChatRevealTimeout) clearTimeout(petChatRevealTimeout);
@@ -2372,6 +3013,7 @@ function showPetChat(
       petChatWindow.showInactive();
       pendingPetChatReveal = false;
       petChatRevealTimeout = null;
+      elevateWorkspaceBrowserAboveCompanionWindows();
     }, 250);
   };
 
@@ -2399,6 +3041,7 @@ function showPetChat(
     wireDebugWindowBorder(petChatWindow);
 
     petChatWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    setCompanionWindowAlwaysOnTop(petChatWindow, MAC_AOT_COMPANION_POPUP_LEVEL, MAC_AOT_COMPANION_PANEL_RELATIVE_LEVEL);
 
     if (isDev) {
       petChatWindow.loadURL(`http://localhost:${DEV_PORT}/pet-chat.html`);
@@ -2425,6 +3068,7 @@ function showPetChat(
       petChatWindow?.webContents.send('chat-message', message);
       scheduleFallbackReveal();
       schedulePetChatAutoHide();
+      elevateWorkspaceBrowserAboveCompanionWindows();
     });
   } else {
     // Update position and message
@@ -2436,11 +3080,13 @@ function showPetChat(
     petChatWindow.webContents.send('chat-message', message);
     scheduleFallbackReveal();
     schedulePetChatAutoHide();
+    elevateWorkspaceBrowserAboveCompanionWindows();
   }
 }
 
 function hidePetChat() {
   pendingPetChatReveal = false;
+  isPetChatAudioPlaying = false;
   if (petChatRevealTimeout) {
     clearTimeout(petChatRevealTimeout);
     petChatRevealTimeout = null;
@@ -2475,6 +3121,7 @@ function resizePetChatToContent(width: number, height: number) {
     petChatWindow.showInactive();
     pendingPetChatReveal = false;
   }
+  elevateWorkspaceBrowserAboveCompanionWindows();
 }
 
 function updatePetChatPosition() {
@@ -2486,14 +3133,27 @@ function updatePetChatPosition() {
 
   const [cw, ch] = petChatWindow.getSize();
   const chatX = petX + (petWidth - cw) / 2;
-  const chatY = petY - ch + PET_CHAT_VERTICAL_GAP;
+  const chatY = petY - ch + verticalGapAbovePetClearingPomodoroTimer(PET_CHAT_VERTICAL_GAP);
 
   petChatWindow.setPosition(Math.max(0, Math.round(chatX)), Math.max(0, Math.round(chatY)));
+  updatePetPomodoroTimerPosition();
+}
+
+/** Recompute pet-anchored panel Y when Pomodoro timer visibility changes (layout above timer strip). */
+function refreshPetAnchoredPanelsForPomodoroLayout(): void {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  updateWorkspaceBrowserPosition();
+  updateAssistantPosition();
+  updateScreenshotQuestionPosition();
+  updatePetChatPosition();
 }
 
 function updateAssistantPosition() {
   if (!petWindow || !assistantWindow || !assistantWindow.isVisible()) return;
 
+  const avoidBounds = workspaceBrowserWindow && !workspaceBrowserWindow.isDestroyed()
+    ? workspaceBrowserWindow.getBounds()
+    : undefined;
   const [petX, petY] = petWindow.getPosition();
   const [petWidth] = petWindow.getSize();
   const [assistantWidth, assistantHeight] = assistantWindow.getSize();
@@ -2502,14 +3162,19 @@ function updateAssistantPosition() {
     anchor: { x: petX, y: petY, width: petWidth, height: PET_WINDOW_HEIGHT },
     windowSize: { width: assistantWidth, height: assistantHeight },
     workArea,
-    verticalGap: ASSISTANT_VERTICAL_GAP,
+    verticalGap: verticalGapAbovePetClearingPomodoroTimer(ASSISTANT_VERTICAL_GAP),
+    avoidBounds,
+    avoidGap: WORKSPACE_ASSISTANT_AVOID_GAP,
   });
 
   assistantWindow.setPosition(position.x, position.y);
+  elevateWorkspaceBrowserAboveCompanionWindows();
 }
 
 function updateWorkspaceBrowserPosition() {
-  if (!petWindow || !workspaceBrowserWindow || !workspaceBrowserWindow.isVisible()) return;
+  if (!petWindow || !workspaceBrowserWindow || workspaceBrowserWindow.isDestroyed()) {
+    return;
+  }
 
   const [petX, petY] = petWindow.getPosition();
   const [petWidth] = petWindow.getSize();
@@ -2519,10 +3184,11 @@ function updateWorkspaceBrowserPosition() {
     anchor: { x: petX, y: petY, width: petWidth, height: PET_WINDOW_HEIGHT },
     windowSize: { width: browserWidth, height: browserHeight },
     workArea,
-    verticalGap: WORKSPACE_BROWSER_VERTICAL_GAP,
+    verticalGap: verticalGapAbovePetClearingPomodoroTimer(WORKSPACE_BROWSER_VERTICAL_GAP),
   });
 
   workspaceBrowserWindow.setPosition(position.x, position.y);
+  elevateWorkspaceBrowserAboveCompanionWindows();
 }
 
 function updateScreenshotQuestionPosition() {
@@ -2536,7 +3202,7 @@ function updateScreenshotQuestionPosition() {
     anchor: { x: petX, y: petY, width: petWidth, height: PET_WINDOW_HEIGHT },
     windowSize: { width: questionWidth, height: questionHeight },
     workArea,
-    verticalGap: ASSISTANT_VERTICAL_GAP,
+    verticalGap: verticalGapAbovePetClearingPomodoroTimer(ASSISTANT_VERTICAL_GAP),
   });
 
   screenshotQuestionWindow.setPosition(position.x, position.y);
@@ -2550,12 +3216,18 @@ function revealAssistantWindow() {
       visibleOnFullScreen: true,
     });
   }
+  applyAssistantWindowStacking();
 
-  if (shouldRevealWindowInactive('assistant')) {
+  const revealInactive = shouldRevealAssistantInactive();
+  if (revealInactive) {
     assistantWindow.showInactive();
   } else {
     assistantWindow.show();
   }
+  if (shouldRepositionAssistantAfterReveal()) {
+    updateAssistantPosition();
+  }
+  elevateWorkspaceBrowserAboveCompanionWindows();
 }
 
 /**
@@ -2626,11 +3298,17 @@ function reconcileAssistantWindowReference(): void {
   }
 }
 
-function openAssistantOnTab(tab: 'chat' | 'settings') {
+function openAssistantOnTab(tab: 'settings' | 'prayers' | 'todos' | 'focus') {
   createAssistantWindow();
   if (!assistantWindow || assistantWindow.isDestroyed()) return;
 
-  const channel = tab === 'settings' ? 'switch-to-settings' : 'switch-to-chat';
+  const channel = tab === 'settings'
+    ? 'switch-to-settings'
+    : tab === 'prayers'
+      ? 'switch-to-prayers'
+      : tab === 'todos'
+        ? 'switch-to-todos'
+        : 'switch-to-focus';
   const sendTabSwitch = () => {
     if (!assistantWindow || assistantWindow.isDestroyed()) return;
     assistantWindow.webContents.send(channel);
@@ -2648,8 +3326,11 @@ function openAssistantOnTab(tab: 'chat' | 'settings') {
 function createAssistantWindow() {
   if (assistantWindow?.isDestroyed()) {
     assistantWindow = null;
+    shouldRevealAssistantWhenReady = false;
   }
   reconcileAssistantWindowReference();
+
+  shouldRevealAssistantWhenReady = true;
 
   if (assistantWindow) {
     revealAssistantWindow();
@@ -2668,7 +3349,7 @@ function createAssistantWindow() {
     const [petWidth] = petWindow.getSize();
 
     initialX = petX + (petWidth - ASSISTANT_WINDOW_WIDTH) / 2;
-    initialY = petY - ASSISTANT_WINDOW_HEIGHT + ASSISTANT_VERTICAL_GAP;
+    initialY = petY - ASSISTANT_WINDOW_HEIGHT + verticalGapAbovePetClearingPomodoroTimer(ASSISTANT_VERTICAL_GAP);
 
     // Keep within screen bounds
     initialX = Math.max(0, Math.min(initialX, screenWidth - ASSISTANT_WINDOW_WIDTH));
@@ -2698,6 +3379,7 @@ function createAssistantWindow() {
   if (process.platform === 'darwin' || process.platform === 'linux') {
     assistantWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
+  applyAssistantWindowStacking();
 
   if (isDev) {
     assistantWindow.loadURL(`http://localhost:${DEV_PORT}/assistant.html`);
@@ -2706,11 +3388,14 @@ function createAssistantWindow() {
   }
 
   assistantWindow.once('ready-to-show', () => {
-    revealAssistantWindow();
+    if (shouldRevealAssistantWhenReady) {
+      revealAssistantWindow();
+    }
   });
 
   assistantWindow.on('closed', () => {
     assistantWindow = null;
+    shouldRevealAssistantWhenReady = false;
   });
 }
 
@@ -2737,8 +3422,7 @@ function createPetContextMenuWindow() {
   });
   wireDebugWindowBorder(petContextMenuWindow);
   petContextMenuWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  // Keep the context menu above the pet window, which also uses screen-saver level.
-  petContextMenuWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+  setPetContextMenuWindowAlwaysOnTop(petContextMenuWindow);
 
   if (isDev) {
     petContextMenuWindow.loadURL(`http://localhost:${DEV_PORT}/pet-context-menu.html`);
@@ -2759,9 +3443,13 @@ function createPetContextMenuWindow() {
 
 function createWorkspaceBrowserWindow() {
   if (workspaceBrowserWindow) {
+    setWorkspaceBrowserWindowAlwaysOnTop(workspaceBrowserWindow);
     workspaceBrowserWindow.show();
     workspaceBrowserWindow.focus();
     updateWorkspaceBrowserPosition();
+    applyAssistantWindowStacking();
+    updateAssistantPosition();
+    elevateWorkspaceBrowserAboveCompanionWindows();
     return;
   }
 
@@ -2775,7 +3463,7 @@ function createWorkspaceBrowserWindow() {
     const [petWidth] = petWindow.getSize();
 
     initialX = petX + (petWidth - WORKSPACE_BROWSER_WIDTH) / 2;
-    initialY = petY - WORKSPACE_BROWSER_HEIGHT + ASSISTANT_VERTICAL_GAP;
+    initialY = petY - WORKSPACE_BROWSER_HEIGHT + verticalGapAbovePetClearingPomodoroTimer(WORKSPACE_BROWSER_VERTICAL_GAP);
     initialX = Math.max(0, Math.min(initialX, screenWidth - WORKSPACE_BROWSER_WIDTH));
     initialY = Math.max(0, initialY);
   }
@@ -2803,6 +3491,7 @@ function createWorkspaceBrowserWindow() {
   if (process.platform === 'darwin' || process.platform === 'linux') {
     workspaceBrowserWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
+  setWorkspaceBrowserWindowAlwaysOnTop(workspaceBrowserWindow);
 
   if (isDev) {
     workspaceBrowserWindow.loadURL(`http://localhost:${DEV_PORT}/workspace-browser.html`);
@@ -2814,6 +3503,12 @@ function createWorkspaceBrowserWindow() {
     workspaceBrowserWindow?.show();
     workspaceBrowserWindow?.focus();
     updateWorkspaceBrowserPosition();
+    applyAssistantWindowStacking();
+    updateAssistantPosition();
+    if (workspaceBrowserWindow && !workspaceBrowserWindow.isDestroyed()) {
+      setWorkspaceBrowserWindowAlwaysOnTop(workspaceBrowserWindow);
+    }
+    elevateWorkspaceBrowserAboveCompanionWindows();
   });
 
   workspaceBrowserWindow.on('focus', () => {
@@ -2822,10 +3517,12 @@ function createWorkspaceBrowserWindow() {
 
   workspaceBrowserWindow.on('resize', () => {
     updateWorkspaceBrowserPosition();
+    updateAssistantPosition();
   });
 
   workspaceBrowserWindow.on('closed', () => {
     workspaceBrowserWindow = null;
+    applyAssistantWindowStacking();
   });
 }
 
@@ -2856,17 +3553,18 @@ function showPetContextMenuAtCursor(cursorX: number, cursorY: number) {
 function toggleAssistantWindow() {
   if (assistantWindow?.isDestroyed()) {
     assistantWindow = null;
+    shouldRevealAssistantWhenReady = false;
   }
   reconcileAssistantWindowReference();
 
-  if (!assistantWindow) {
-    createAssistantWindow();
-    return;
-  }
-
-  if (assistantWindow.isVisible()) {
+  if (assistantWindow?.isVisible()) {
+    shouldRevealAssistantWhenReady = false;
     assistantWindow.hide();
   } else {
+    shouldRevealChatbarWhenReady = false;
+    if (chatbarWindow && !chatbarWindow.isDestroyed()) {
+      chatbarWindow.hide();
+    }
     createAssistantWindow();
   }
 }
@@ -2878,6 +3576,7 @@ function createChatbarWindow(options?: { preloadOnly?: boolean }) {
     if (isChatbarWindowReady) {
       chatbarWindow.show();
       chatbarWindow.focus();
+      elevateWorkspaceBrowserAboveCompanionWindows();
     } else {
       shouldRevealChatbarWhenReady = true;
     }
@@ -2914,6 +3613,7 @@ function createChatbarWindow(options?: { preloadOnly?: boolean }) {
   wireDebugWindowBorder(chatbarWindow);
 
   chatbarWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  setCompanionWindowAlwaysOnTop(chatbarWindow, MAC_AOT_COMPANION_POPUP_LEVEL, MAC_AOT_COMPANION_PANEL_RELATIVE_LEVEL);
 
   // Make transparent areas click-through
   chatbarWindow.setIgnoreMouseEvents(true, { forward: true });
@@ -2931,6 +3631,7 @@ function createChatbarWindow(options?: { preloadOnly?: boolean }) {
       shouldRevealChatbarWhenReady = false;
       chatbarWindow?.show();
       chatbarWindow?.focus();
+      elevateWorkspaceBrowserAboveCompanionWindows();
     }
   });
 
@@ -2958,8 +3659,13 @@ function warmChatbarWindow() {
 
 function toggleChatbarWindow() {
   if (chatbarWindow && chatbarWindow.isVisible()) {
+    shouldRevealChatbarWhenReady = false;
     chatbarWindow.hide();
   } else {
+    shouldRevealAssistantWhenReady = false;
+    if (assistantWindow && !assistantWindow.isDestroyed()) {
+      assistantWindow.hide();
+    }
     createChatbarWindow();
   }
 }
@@ -2990,7 +3696,7 @@ function createScreenshotQuestionWindow() {
       anchor: { x: petX, y: petY, width: petWidth, height: PET_WINDOW_HEIGHT },
       windowSize: { width: windowWidth, height: windowHeight },
       workArea,
-      verticalGap: ASSISTANT_VERTICAL_GAP,
+      verticalGap: verticalGapAbovePetClearingPomodoroTimer(ASSISTANT_VERTICAL_GAP),
     });
     x = position.x;
     y = position.y;
@@ -3022,6 +3728,7 @@ function createScreenshotQuestionWindow() {
   wireDebugWindowBorder(screenshotQuestionWindow);
 
   screenshotQuestionWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  setCompanionWindowAlwaysOnTop(screenshotQuestionWindow, MAC_AOT_COMPANION_POPUP_LEVEL, MAC_AOT_COMPANION_PANEL_RELATIVE_LEVEL);
 
   if (isDev) {
     screenshotQuestionWindow.loadURL(`http://localhost:${DEV_PORT}/screenshot-question.html`);
@@ -3037,6 +3744,7 @@ function createScreenshotQuestionWindow() {
     } else {
       screenshotQuestionWindow.show();
     }
+    elevateWorkspaceBrowserAboveCompanionWindows();
   });
 
   // Keep reflection capture visible during focus changes from screen capture.
@@ -3210,6 +3918,9 @@ function startMainApp() {
 
   watchers.start();
   scheduleTimedQuranReminders();
+  schedulePrayerAwareness();
+  scheduleTodoReminders();
+  schedulePomodoroTicker();
 
   // Start idle detection
   startIdleDetection();
@@ -3329,7 +4040,7 @@ function setupIPC() {
     } else if (action === 'workspace') {
       createWorkspaceBrowserWindow();
     } else {
-      openAssistantOnTab('chat');
+      openAssistantOnTab('prayers');
     }
     petContextMenuWindow?.hide();
   });
@@ -3391,6 +4102,44 @@ function setupIPC() {
 
   ipcMain.handle('dev-force-timed-reminder-comment', async () => {
     return maybeSendTimedQuranReminder({ force: true });
+  });
+
+  ipcMain.handle('dev-force-prayer-reminder-comment', async () => {
+    if (!petWindow) return false;
+    const today = getAyahLensState().prayer.today;
+    const maghrib = today?.prayers.find((p) => p.name === 'maghrib');
+    const label = maghrib?.label ?? 'Maghrib';
+    const time = maghrib?.time ?? '6:15 PM';
+    showPetChat(
+      {
+        id: randomUUID(),
+        text: `${label} is coming up at ${time}. Take a moment to prepare.`,
+        quickReplies: ['Got it', 'Open Prayers', 'Not now'],
+      },
+      { bypassTutorial: true },
+    );
+    if (!isSleeping) {
+      petWindow.webContents.send('clawbot-mood', { state: 'curious', reason: 'prayer reminder' });
+    }
+    resetInteractionTimer();
+    return true;
+  });
+
+  ipcMain.handle('dev-force-todo-reminder-comment', async () => {
+    if (!petWindow) return false;
+    showPetChat(
+      {
+        id: randomUUID(),
+        text: 'Task reminder: Review PR 3',
+        quickReplies: ['Done', 'Open To Do', 'Not now'],
+      },
+      { bypassTutorial: true },
+    );
+    if (!isSleeping) {
+      petWindow.webContents.send('clawbot-mood', { state: 'curious', reason: 'todo reminder' });
+    }
+    resetInteractionTimer();
+    return true;
   });
 
   // Toggle chatbar window
@@ -3546,6 +4295,10 @@ function setupIPC() {
 
     if (key === 'dev.showPetModeOverlay') {
       petWindow?.webContents.send('dev-show-pet-mode-overlay-changed', Boolean(value));
+    }
+
+    if (key === 'pet.appearanceId') {
+      petWindow?.webContents.send('pet-appearance-changed', normalizedValue);
     }
 
     return store.store;
@@ -3745,6 +4498,16 @@ function setupIPC() {
     return getAyahLensState().preferences;
   });
 
+  ipcMain.handle('ayah-recitation-resources', async () => {
+    try {
+      const accessToken = await getQuranContentAccessToken();
+      const resources = await getQuranClient().fetchRecitationResources(accessToken);
+      return filterAvailableRecitationResources(resources);
+    } catch {
+      return [];
+    }
+  });
+
   ipcMain.handle('ayah-settings-update', (_event, key: string, value: unknown) => {
     try {
       const nextSettings = updateAyahLensSetting(key, value);
@@ -3755,6 +4518,167 @@ function setupIPC() {
     } catch {
       return getAyahLensState().preferences;
     }
+  });
+
+  ipcMain.handle('qul-is-available', () => isQulBundleAvailable(app));
+
+  ipcMain.handle('qul-font-packs', () => getQulFontPackPresence(resolveQulRoot(app)));
+
+  ipcMain.handle(
+    'qul-rendered-verse',
+    async (
+      _event,
+      raw: { verseKey?: string; mushafKey?: string; includeTajweed?: boolean } | undefined,
+    ) => {
+      if (!raw || typeof raw.verseKey !== 'string') return null;
+      const rawMushaf = String(raw.mushafKey ?? '');
+      const mushafKey = coerceQulVerseScriptMushafKey(rawMushaf);
+      if (!mushafKey) {
+        return null;
+      }
+      const parsed = parseVerseKeyToSurahAyah(raw.verseKey.trim());
+      if (!parsed) return null;
+      try {
+        return await getQulRenderedVerse(
+          {
+            surahId: parsed.surah,
+            ayahNumber: parsed.ayah,
+            mushafKey,
+            includeTajweed: Boolean(raw.includeTajweed),
+          },
+          app,
+        );
+      } catch (error) {
+        console.error('qul-rendered-verse failed', error);
+        return null;
+      }
+    },
+  );
+
+  ipcMain.handle('qul-read-font', async (_event, rawPath: unknown) => {
+    if (typeof rawPath !== 'string' || rawPath.length === 0) return null;
+    const root = resolveQulRoot(app);
+    if (!root) return null;
+    if (!isFontPathWithinQulRoot(root, rawPath)) {
+      return null;
+    }
+    const resolved = path.resolve(rawPath);
+    try {
+      const s = await stat(resolved);
+      if (!s.isFile()) return null;
+      return await readFile(resolved);
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle('prayer-settings-get', () => getAyahLensState().prayer.settings);
+
+  ipcMain.handle('prayer-settings-update', (_event, patch: Partial<PrayerSettings>) => {
+    const settings = updatePrayerSettings(patch ?? {});
+    void refreshPrayerTimes().catch(() => undefined);
+    return settings;
+  });
+
+  ipcMain.handle('prayer-times-get', async () => {
+    const state = getAyahLensState();
+    if (shouldRefreshPrayerDay(state.prayer.today, state.prayer.tomorrow, state.prayer.settings, Date.now())) {
+      try {
+        await refreshPrayerTimes();
+      } catch {
+        // keep cached bundle below
+      }
+    }
+    const latest = getAyahLensState().prayer;
+    return { today: latest.today, tomorrow: latest.tomorrow };
+  });
+
+  ipcMain.handle('prayer-times-refresh', async () => {
+    await refreshPrayerTimes();
+    const latest = getAyahLensState().prayer;
+    return { today: latest.today, tomorrow: latest.tomorrow };
+  });
+
+  ipcMain.handle('todo-list', () => listTodos(getAyahLensState().todos));
+
+  ipcMain.handle('todo-settings-update', (_event, patch: Partial<TodoSettings>) => updateTodoSettings(patch ?? {}));
+
+  ipcMain.handle('todo-create', (_event, input: Parameters<typeof createTodo>[1]) => {
+    const state = getAyahLensState();
+    const todos = createTodo(state.todos, input);
+    setAyahLensState({ ...state, todos });
+    return listTodos(todos);
+  });
+
+  ipcMain.handle('todo-update', (_event, todoId: string, patch: Parameters<typeof updateTodo>[2]) => {
+    const state = getAyahLensState();
+    const todos = updateTodo(state.todos, todoId, patch ?? {});
+    setAyahLensState({ ...state, todos });
+    return listTodos(todos);
+  });
+
+  ipcMain.handle('todo-complete', (_event, todoId: string, completed: boolean) => {
+    const state = getAyahLensState();
+    const todos = setTodoCompleted(state.todos, todoId, completed);
+    setAyahLensState({ ...state, todos });
+    return listTodos(todos);
+  });
+
+  ipcMain.handle('todo-delete', (_event, todoId: string) => {
+    const state = getAyahLensState();
+    const todos = deleteTodoItem(state.todos, todoId);
+    setAyahLensState({ ...state, todos });
+    return listTodos(todos);
+  });
+
+  ipcMain.handle('pomodoro-state-get', () => ({
+    ...getAyahLensState().pomodoro,
+    remainingMs: getPomodoroRemainingMs(getAyahLensState().pomodoro, Date.now()),
+  }));
+
+  ipcMain.handle('pomodoro-settings-update', (_event, patch: Partial<PomodoroSettings>) => {
+    const settings = updatePomodoroSettings(patch ?? {});
+    return { ...getAyahLensState().pomodoro, settings, remainingMs: getPomodoroRemainingMs(getAyahLensState().pomodoro, Date.now()) };
+  });
+
+  ipcMain.handle('pomodoro-start', (_event, input: { kind: PomodoroSessionKind; durationMinutes?: number; todoId?: string | null }) => {
+    const state = getAyahLensState();
+    const pomodoro = startPomodoroSession(state.pomodoro, input);
+    setAyahLensState({ ...state, pomodoro });
+    updateTrayPomodoroTooltip();
+    return { ...pomodoro, remainingMs: getPomodoroRemainingMs(pomodoro, Date.now()) };
+  });
+
+  ipcMain.handle('pomodoro-pause', () => {
+    const state = getAyahLensState();
+    const pomodoro = pausePomodoroSession(state.pomodoro);
+    setAyahLensState({ ...state, pomodoro });
+    updateTrayPomodoroTooltip();
+    return { ...pomodoro, remainingMs: getPomodoroRemainingMs(pomodoro, Date.now()) };
+  });
+
+  ipcMain.handle('pomodoro-resume', () => {
+    const state = getAyahLensState();
+    const pomodoro = resumePomodoroSession(state.pomodoro);
+    setAyahLensState({ ...state, pomodoro });
+    updateTrayPomodoroTooltip();
+    return { ...pomodoro, remainingMs: getPomodoroRemainingMs(pomodoro, Date.now()) };
+  });
+
+  ipcMain.handle('pomodoro-cancel', () => {
+    const state = getAyahLensState();
+    const pomodoro = cancelPomodoroSession(state.pomodoro);
+    setAyahLensState({ ...state, pomodoro });
+    updateTrayPomodoroTooltip();
+    return { ...pomodoro, remainingMs: getPomodoroRemainingMs(pomodoro, Date.now()) };
+  });
+
+  ipcMain.handle('pomodoro-complete', () => {
+    const state = getAyahLensState();
+    const pomodoro = completePomodoroSession(state.pomodoro);
+    setAyahLensState({ ...state, pomodoro });
+    updateTrayPomodoroTooltip();
+    return { ...pomodoro, remainingMs: getPomodoroRemainingMs(pomodoro, Date.now()) };
   });
 
   // Get chat history
@@ -3969,9 +4893,10 @@ function setupIPC() {
       store.set('pet.position', { x: newX, y: newY });
       // Also move the chat windows if visible
       updatePetChatPosition();
+      updatePetPomodoroTimerPosition();
+      updateWorkspaceBrowserPosition();
       updateAssistantPosition();
       updateScreenshotQuestionPosition();
-      updateWorkspaceBrowserPosition();
       petContextMenuWindow?.hide();
       resetInteractionTimer(); // User is interacting
     }
@@ -3983,6 +4908,7 @@ function setupIPC() {
     text: string;
     quickReplies?: string[];
     reflectionId?: string;
+    verseKey?: string;
     arabicText?: string;
     footerText?: string;
   }) => {
@@ -4006,8 +4932,37 @@ function setupIPC() {
     }
   });
 
+  ipcMain.on('pet-chat-audio-playing', (_event, isPlaying: boolean) => {
+    isPetChatAudioPlaying = Boolean(isPlaying);
+    if (isPetChatAudioPlaying) {
+      if (petChatAutoHideTimeout) {
+        clearTimeout(petChatAutoHideTimeout);
+        petChatAutoHideTimeout = null;
+      }
+      return;
+    }
+    if (petChatWindow && !petChatWindow.isDestroyed() && petChatWindow.isVisible()) {
+      schedulePetChatAutoHide();
+    }
+  });
+
   // Forward pet chat reply to pet window
   ipcMain.on('pet-chat-reply', (_event, reply: string) => {
+    if (reply === 'Open Prayers') {
+      openAssistantOnTab('prayers');
+    } else if (reply === 'Open To Do') {
+      openAssistantOnTab('todos');
+    } else if (reply === 'Open Focus') {
+      openAssistantOnTab('focus');
+    } else if (reply === 'Start Break') {
+      const state = getAyahLensState();
+      setAyahLensState({ ...state, pomodoro: startPomodoroSession(state.pomodoro, { kind: getNextPomodoroKind(state.pomodoro) }) });
+      updateTrayPomodoroTooltip();
+    } else if (reply === 'Start Focus') {
+      const state = getAyahLensState();
+      setAyahLensState({ ...state, pomodoro: startPomodoroSession(state.pomodoro, { kind: 'focus' }) });
+      updateTrayPomodoroTooltip();
+    }
     petWindow?.webContents.send('pet-chat-reply', reply);
   });
 
@@ -4240,6 +5195,13 @@ function normalizeSettingsValue(key: string, value: unknown): unknown {
       return sanitizeAccelerator(value, DEFAULT_HOTKEYS.captureScreen);
     case 'hotkeys.openAssistant':
       return sanitizeAccelerator(value, DEFAULT_HOTKEYS.openAssistant);
+    case 'pet.appearanceId': {
+      const v = typeof value === 'string' ? value : '';
+      if (v === 'ayah' || v === 'bolt' || v === 'cloudlet' || v === 'cosmo' || v === 'boba') {
+        return v;
+      }
+      return 'ayah';
+    }
     default:
       return value;
   }
@@ -4559,7 +5521,7 @@ function setupTray() {
     : appIcon.resize({ width: 16, height: 16 });
 
   tray = new Tray(trayIcon);
-  tray.setToolTip('Ayati - Quran Desktop Companion');
+  updateTrayPomodoroTooltip();
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -4647,7 +5609,51 @@ if (shouldStartApp) {
     targetWindow?.webContents.send('ayah-oauth-callback', url);
   });
 
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: 'ayati-qul-font',
+      privileges: {
+        secure: true,
+        standard: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        stream: true,
+      },
+    },
+  ]);
+
   app.whenReady().then(async () => {
+    protocol.handle('ayati-qul-font', async (request) => {
+      let requestedUrl: URL;
+      try {
+        requestedUrl = new URL(request.url);
+      } catch {
+        return new Response(null, { status: 400 });
+      }
+      const rawPath = requestedUrl.searchParams.get('path');
+      if (typeof rawPath !== 'string' || rawPath.length === 0) {
+        return new Response(null, { status: 400 });
+      }
+      const root = resolveQulRoot(app);
+      if (!root || !isFontPathWithinQulRoot(root, rawPath)) {
+        return new Response(null, { status: 403 });
+      }
+      const resolved = path.resolve(rawPath);
+      try {
+        const stats = await stat(resolved);
+        if (!stats.isFile()) return new Response(null, { status: 404 });
+        const buf = await readFile(resolved);
+        return new Response(buf, {
+          headers: {
+            'Content-Type': 'font/ttf',
+            'Cross-Origin-Resource-Policy': 'cross-origin',
+          },
+        });
+      } catch {
+        return new Response(null, { status: 404 });
+      }
+    });
+
     applyDockIcon();
     setupIPC();
     setupAutoUpdater();

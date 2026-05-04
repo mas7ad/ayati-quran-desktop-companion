@@ -14,6 +14,7 @@ export default defineConfig({
         pet: resolve(__dirname, 'src/renderer/pet.html'),
         'pet-context-menu': resolve(__dirname, 'src/renderer/pet-context-menu.html'),
         'pet-chat': resolve(__dirname, 'src/renderer/pet-chat.html'),
+        'pomodoro-timer': resolve(__dirname, 'src/renderer/pomodoro-timer.html'),
         assistant: resolve(__dirname, 'src/renderer/assistant.html'),
         chatbar: resolve(__dirname, 'src/renderer/chatbar.html'),
         'screenshot-question': resolve(__dirname, 'src/renderer/screenshot-question.html'),

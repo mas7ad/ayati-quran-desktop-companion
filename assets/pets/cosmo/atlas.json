@@ -1,0 +1,19 @@
+{
+  "frameWidth": 192,
+  "frameHeight": 208,
+  "columns": 8,
+  "sheetWidth": 1536,
+  "sheetHeight": 1872,
+  "fps": 8,
+  "clips": {
+    "idle": { "start": 0, "length": 6, "fps": 4 },
+    "running-right": { "start": 8, "length": 8 },
+    "running-left": { "start": 16, "length": 8 },
+    "waving": { "start": 24, "length": 4 },
+    "jumping": { "start": 32, "length": 5 },
+    "failed": { "start": 40, "length": 8 },
+    "waiting": { "start": 48, "length": 6 },
+    "running": { "start": 56, "length": 6 },
+    "review": { "start": 64, "length": 6 }
+  }
+}

@@ -52,6 +52,7 @@ interface StoreSchema {
     mood: string;
     attentionSeeker: boolean;
     transparentWhenSleeping: boolean;
+    appearanceId: 'ayah' | 'bolt' | 'cloudlet' | 'cosmo' | 'boba';
   };
   screenCapture: {
     enabled: boolean;
@@ -95,6 +96,7 @@ export function createDefaultStoreSchema(): StoreSchema {
       mood: 'idle',
       attentionSeeker: true,
       transparentWhenSleeping: false,
+      appearanceId: 'ayah',
     },
     screenCapture: {
       enabled: false,

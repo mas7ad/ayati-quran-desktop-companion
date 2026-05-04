@@ -22,6 +22,17 @@ const reflection: AyahReflection = {
 };
 
 describe('AyahVerseCard', () => {
+  beforeEach(() => {
+    Object.assign(window, {
+      ayati: {
+        ...(window as unknown as { ayati?: Record<string, unknown> }).ayati,
+        qulIsAvailable: vi.fn().mockResolvedValue(false),
+        getAyahLensSettings: vi.fn().mockResolvedValue({ qulArabicEnabled: false }),
+        getQulRenderedVerse: vi.fn(),
+      },
+    });
+  });
+
   it('formats long tafsir text into readable paragraphs', () => {
     const paragraphs = getTafsirParagraphs(
       'The first explanation introduces the theme and gives the main context. It continues with supporting detail that should not stay in one dense block. The next explanation gives a second point and should become easier to scan. Final reminder.',

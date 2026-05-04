@@ -1,10 +1,9 @@
 import type { OnboardingData } from '../Onboarding';
 import { OnboardingIcon } from '../OnboardingIcon';
 import { formatAcceleratorForDisplay } from '../../components/HotkeyInput';
-import appIconUrl from '../../../../assets/icon.png';
 
-import { CharacterSvg } from '../../pet/Pet';
-// Styles are imported in WelcomeStep and likely persistent in the onboarding flow bundle
+import { SpritePet } from '../../pet/SpritePet';
+import '../../pet/styles.css';
 
 interface Props {
   data: OnboardingData;
@@ -22,8 +21,8 @@ export const CompleteStep: React.FC<Props> = ({ data, updateData }) => {
     <div className="min-h-full px-12 flex flex-col items-center justify-center text-center py-10">
       <div className="mb-10 relative">
         <div className="relative p-1.5 rounded-[46px] bg-white border border-[#67E0A3]/15">
-          <div className="h-[150px] w-[150px] rounded-[42px] overflow-hidden bg-[#FAF9F6] flex items-center justify-center lobster-container state-happy scale-110">
-            <CharacterSvg pupilOffset={null} />
+          <div className="h-[150px] w-[150px] rounded-[42px] overflow-hidden bg-[#FAF9F6] flex items-center justify-center lobster-container sprite-pet-root scale-110">
+            <SpritePet appearanceId="ayah" clip="waving" />
           </div>
         </div>
       </div>
