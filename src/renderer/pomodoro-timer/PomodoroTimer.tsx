@@ -24,7 +24,7 @@ export const PomodoroTimer: React.FC = () => {
   }, []);
 
   if (!data) {
-    return <div className="pomodoro-timer-root" aria-hidden />;
+    return null;
   }
 
   return (

@@ -13,7 +13,9 @@ export function getAssistantWindowStackingPolicy({
 }): AssistantWindowStackingPolicy {
   if (hasWorkspaceBrowser) {
     return {
-      isAlwaysOnTop: false,
+      isAlwaysOnTop: true,
+      level: 'pop-up-menu',
+      relativeLevel: 0,
       shouldRepositionAfterReveal: true,
       shouldRevealInactive: true,
     };

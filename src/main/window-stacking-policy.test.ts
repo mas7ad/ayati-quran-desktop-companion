@@ -13,9 +13,11 @@ describe('getAssistantWindowStackingPolicy', () => {
     });
   });
 
-  it('demotes the assistant when the workspace browser exists', () => {
+  it('keeps the assistant always-on-top when the workspace browser exists', () => {
     expect(getAssistantWindowStackingPolicy({ hasWorkspaceBrowser: true })).toEqual({
-      isAlwaysOnTop: false,
+      isAlwaysOnTop: true,
+      level: 'pop-up-menu',
+      relativeLevel: 0,
       shouldRepositionAfterReveal: true,
       shouldRevealInactive: true,
     });

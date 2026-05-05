@@ -153,6 +153,7 @@ app.disableHardwareAcceleration();
 let petWindow: BrowserWindow | null = null;
 let petChatWindow: BrowserWindow | null = null;
 let petPomodoroTimerWindow: BrowserWindow | null = null;
+let pendingPomodoroTimerLoadHandler: (() => void) | null = null;
 let assistantWindow: BrowserWindow | null = null;
 let chatbarWindow: BrowserWindow | null = null;
 let screenshotQuestionWindow: BrowserWindow | null = null;
@@ -234,6 +235,7 @@ const DEV_WINDOW_BORDER_CSS = `
   }
 `;
 const debugBorderStyleKeys = new WeakMap<BrowserWindow, string>();
+
 const shouldStartApp = enforceSingleInstanceApp(app, getSingleInstanceFocusWindow);
 
 function getAssetPath(fileName: string): string {
@@ -1352,7 +1354,7 @@ function elevatePetAboveCompanionWindows(): void {
     // ignore
   }
 
-  if (petPomodoroTimerWindow && !petPomodoroTimerWindow.isDestroyed()) {
+  if (petPomodoroTimerWindow && !petPomodoroTimerWindow.isDestroyed() && petPomodoroTimerWindow.isVisible()) {
     try {
       if (process.platform === 'darwin') {
         setPomodoroTimerWindowAlwaysOnTop(petPomodoroTimerWindow);
@@ -1445,6 +1447,9 @@ const SCREENSHOT_QUESTION_HEIGHT = ASSISTANT_WINDOW_HEIGHT;
 const PET_CAMERA_SNAP_DURATION_MS = 920;
 const PET_CAMERA_SNAP_FLASH_DURATION_MS = 120;
 const DEV_FORCE_ACTIVE_APP_COMMENT_DELAY_MS = 5000;
+/** Dev-only global shortcuts (macOS). See `registerDevOnlyGlobalShortcuts`. */
+const DEV_HOTKEY_QURAN_REMINDER = 'Cmd+Alt+Shift+M';
+const DEV_HOTKEY_ATTENTION_SEEK_TOGGLE = 'Cmd+Alt+Shift+N';
 
 // Attention seeker state
 let attentionInterval: NodeJS.Timeout | null = null;
@@ -2794,20 +2799,39 @@ function updatePetPomodoroTimerPosition(): void {
 }
 
 function deliverPomodoroTimerPayload(w: BrowserWindow, payload: PomodoroPetOverlayPayload | null): void {
-  const run = () => {
-    if (w.isDestroyed()) return;
-    w.webContents.send('pomodoro-overlay-update', payload);
-    if (payload) {
-      const wasHidden = !w.isVisible();
-      w.showInactive();
-      if (wasHidden) {
-        elevatePetAboveCompanionWindows();
+  const cancelPendingHandler = () => {
+    if (pendingPomodoroTimerLoadHandler && !w.isDestroyed()) {
+      w.webContents.removeListener('did-finish-load', pendingPomodoroTimerLoadHandler);
+    }
+    pendingPomodoroTimerLoadHandler = null;
+  };
+
+  if (!payload) {
+    // Cancel any pending show-on-load handler so it cannot re-show the window after hide.
+    cancelPendingHandler();
+    if (!w.isDestroyed()) {
+      if (!w.webContents.isLoading()) {
+        w.webContents.send('pomodoro-overlay-update', null);
       }
-    } else {
       w.hide();
     }
+    return;
+  }
+
+  const run = () => {
+    pendingPomodoroTimerLoadHandler = null;
+    if (w.isDestroyed()) return;
+    w.webContents.send('pomodoro-overlay-update', payload);
+    const wasHidden = !w.isVisible();
+    w.showInactive();
+    if (wasHidden) {
+      elevatePetAboveCompanionWindows();
+    }
   };
+
+  cancelPendingHandler();
   if (w.webContents.isLoading()) {
+    pendingPomodoroTimerLoadHandler = run;
     w.webContents.once('did-finish-load', run);
   } else {
     run();
@@ -3018,6 +3042,8 @@ function createPetWindow() {
     skipTaskbar: true,
     hasShadow: false,
     roundedCorners: false,
+    /** Avoid activating Ayati / switching Spaces on startup (Electron default is `show: true`). */
+    show: false,
     icon: getAppIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -3030,6 +3056,10 @@ function createPetWindow() {
   // Allow dragging and going above menu bar; stay below Pomodoro timer and other companion popups (macOS levels).
   petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   setPetWindowAlwaysOnTop(petWindow);
+
+  petWindow.once('ready-to-show', () => {
+    petWindow?.showInactive();
+  });
 
   if (isDev) {
     petWindow.loadURL(`http://localhost:${DEV_PORT}/pet.html`);
@@ -3095,7 +3125,7 @@ function showPetChat(
   const chatX = petX + (petWidth - chatWidth) / 2;
   const chatY = petY - chatHeight + verticalGapAbovePetClearingPomodoroTimer(PET_CHAT_VERTICAL_GAP);
 
-  const scheduleFallbackReveal = () => {
+  const scheduleFallbackReveal = (delayMs: number = 250) => {
     if (petChatRevealTimeout) clearTimeout(petChatRevealTimeout);
     petChatRevealTimeout = setTimeout(() => {
       if (!pendingPetChatReveal || !petChatWindow || petChatWindow.isDestroyed()) return;
@@ -3104,7 +3134,7 @@ function showPetChat(
       pendingPetChatReveal = false;
       petChatRevealTimeout = null;
       elevateWorkspaceBrowserAboveCompanionWindows();
-    }, 250);
+    }, delayMs);
   };
 
   if (!petChatWindow) {
@@ -3156,19 +3186,27 @@ function showPetChat(
       petChatWindow?.setOpacity(0);
       petChatWindow?.showInactive();
       petChatWindow?.webContents.send('chat-message', message);
-      scheduleFallbackReveal();
+      scheduleFallbackReveal(250);
       schedulePetChatAutoHide();
       elevateWorkspaceBrowserAboveCompanionWindows();
     });
   } else {
     // Update position and message
     petChatWindow.setPosition(Math.max(0, Math.round(chatX)), Math.max(0, Math.round(chatY)));
-    petChatWindow.setOpacity(0);
+    const alreadyShown =
+      petChatWindow.isVisible()
+      && !petChatWindow.isDestroyed()
+      && petChatWindow.getOpacity() > 0.01;
+    // Hiding a visible popup before swapping content causes a noticeable flicker; keep opacity while updating.
+    if (!alreadyShown) {
+      petChatWindow.setOpacity(0);
+    }
     if (!petChatWindow.isVisible()) {
       petChatWindow.showInactive();
     }
     petChatWindow.webContents.send('chat-message', message);
-    scheduleFallbackReveal();
+    // When the chat was already visible, reveal on the next tick so layout can settle without a 250ms blank.
+    scheduleFallbackReveal(alreadyShown ? 0 : 250);
     schedulePetChatAutoHide();
     elevateWorkspaceBrowserAboveCompanionWindows();
   }
@@ -3413,18 +3451,30 @@ function openAssistantOnTab(tab: 'settings' | 'prayers' | 'todos' | 'focus') {
   }
 }
 
-function createAssistantWindow() {
+function createAssistantWindow(options?: { preloadOnly?: boolean }) {
+  const preloadOnly = options?.preloadOnly === true;
+
   if (assistantWindow?.isDestroyed()) {
     assistantWindow = null;
     shouldRevealAssistantWhenReady = false;
   }
   reconcileAssistantWindowReference();
 
-  shouldRevealAssistantWhenReady = true;
+  if (preloadOnly && assistantWindow && !assistantWindow.isDestroyed()) {
+    return;
+  }
+
+  if (preloadOnly) {
+    shouldRevealAssistantWhenReady = false;
+  } else {
+    shouldRevealAssistantWhenReady = true;
+  }
 
   if (assistantWindow) {
-    revealAssistantWindow();
-    updateAssistantPosition();
+    if (!preloadOnly) {
+      revealAssistantWindow();
+      updateAssistantPosition();
+    }
     return;
   }
 
@@ -3478,6 +3528,9 @@ function createAssistantWindow() {
   }
 
   assistantWindow.once('ready-to-show', () => {
+    if (preloadOnly) {
+      return;
+    }
     if (shouldRevealAssistantWhenReady) {
       revealAssistantWindow();
     }
@@ -4049,6 +4102,7 @@ function startMainApp() {
 
   setImmediate(() => {
     warmChatbarWindow();
+    createAssistantWindow({ preloadOnly: true });
   });
 
   // Set up tutorial manager with pet window
@@ -5483,6 +5537,45 @@ function registerHotkeys() {
     toggleHideAllCompanionWindows();
   });
   console.log(`[Hotkeys] Registered hide app: ${hotkeyHideApp}`);
+
+  registerDevOnlyGlobalShortcuts();
+}
+
+/** macOS dev builds only: extra shortcuts that must not ship in production. */
+function registerDevOnlyGlobalShortcuts(): void {
+  if (!isDev || process.platform !== 'darwin') {
+    return;
+  }
+
+  const registerOrWarn = (accelerator: string, label: string, callback: () => void): void => {
+    try {
+      const ok = globalShortcut.register(accelerator, callback);
+      if (ok) {
+        console.log(`[Hotkeys][Dev] Registered ${label}: ${accelerator}`);
+      } else {
+        console.warn(
+          `[Hotkeys][Dev] Could not register ${label} (${accelerator}); chord may be in use.`,
+        );
+      }
+    } catch (error) {
+      console.warn(`[Hotkeys][Dev] Register ${label} failed:`, error);
+    }
+  };
+
+  registerOrWarn(DEV_HOTKEY_QURAN_REMINDER, 'timed Quran reminder', () => {
+    void maybeSendTimedQuranReminder({ force: true });
+  });
+
+  registerOrWarn(DEV_HOTKEY_ATTENTION_SEEK_TOGGLE, 'attention seeker toggle', () => {
+    const current = store.get('pet.attentionSeeker') ?? true;
+    const next = !current;
+    store.set('pet.attentionSeeker', next);
+    stopAttentionSeeker();
+    if (next) {
+      startAttentionSeeker();
+    }
+    console.log(`[Hotkeys][Dev] pet.attentionSeeker → ${next}`);
+  });
 }
 
 function registerConfiguredHotkey(key: string, fallback: string, callback: () => void): string {
