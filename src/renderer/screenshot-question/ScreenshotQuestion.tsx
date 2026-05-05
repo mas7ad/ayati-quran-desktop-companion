@@ -135,9 +135,11 @@ export function ScreenshotQuestion(): JSX.Element {
     updateCurrentReflection(await window.ayati.getAyahTafsir(reflection.id));
   }, [reflection, updateCurrentReflection]);
 
-  const loadAudio = useCallback(async () => {
-    if (!reflection) return;
-    updateCurrentReflection(await window.ayati.getAyahAudio(reflection.id));
+  const loadAudio = useCallback(async (): Promise<AyahReflection | null> => {
+    if (!reflection) return null;
+    const next = await window.ayati.getAyahAudio(reflection.id);
+    if (next) updateCurrentReflection(next);
+    return next ?? null;
   }, [reflection, updateCurrentReflection]);
 
   const saveNote = useCallback(async (body: string) => {
@@ -176,63 +178,62 @@ export function ScreenshotQuestion(): JSX.Element {
     <div className="screenshot-container ayah-capture-shell">
       <section className="ayah-capture-panel">
         <header className="ayah-capture-header">
-          <div>
-            <p className="eyebrow">Ayati - Quran Desktop Companion</p>
-            <h1>Reflect on Screen</h1>
-          </div>
+          <h1>Reflection</h1>
           <button type="button" className="ayah-close-button" onClick={() => window.ayati.closeScreenshotQuestion()}>
             Close
           </button>
         </header>
 
-        {captureState === 'permission' && (
-          <div className="ayah-state">
-            <h2>Screen Recording is required</h2>
-            <p>Enable Ayati - Quran Desktop Companion in System Settings &gt; Privacy &amp; Security &gt; Screen Recording, then try again.</p>
-          </div>
-        )}
+        <div className="ayah-capture-body">
+          {captureState === 'permission' && (
+            <div className="ayah-state">
+              <h2>Screen Recording is required</h2>
+              <p>Enable Ayati - Quran Desktop Companion in System Settings &gt; Privacy &amp; Security &gt; Screen Recording, then try again.</p>
+            </div>
+          )}
 
-        {(captureState === 'checking' || captureState === 'capturing' || captureState === 'analyzing') && (
-          <div className="ayah-state">
-            <div className="capture-spinner" />
-            <h2>{captureState === 'analyzing' ? 'Finding a fitting ayah' : 'Preparing capture'}</h2>
-            <p>Screenshots are temporary. Ayati - Quran Desktop Companion stores only text reflections.</p>
-          </div>
-        )}
+          {(captureState === 'checking' || captureState === 'capturing' || captureState === 'analyzing') && (
+            <div className="ayah-state ayah-state-loading">
+              <div className="capture-spinner" />
+              <h2>{captureState === 'analyzing' ? 'Finding a fitting ayah' : 'Preparing capture'}</h2>
+              <p className="ayah-state-caption">Only text is kept—screenshots are not stored.</p>
+            </div>
+          )}
 
-        {captureState === 'error' && (
-          <div className="ayah-state">
-            <h2>Reflection unavailable</h2>
-            <p>{message}</p>
-            <button type="button" className="ayah-secondary-button" onClick={captureReflection}>
-              Try Again
-            </button>
-          </div>
-        )}
+          {captureState === 'error' && (
+            <div className="ayah-state">
+              <h2>Reflection unavailable</h2>
+              <p>{message}</p>
+              <button type="button" className="ayah-secondary-button" onClick={captureReflection}>
+                Try Again
+              </button>
+            </div>
+          )}
 
-        {reflection && captureState === 'ready' && (
-          <AyahVerseCard
-            reflection={reflection}
-            collections={collections}
-            isSaving={isSaving}
-            onSave={saveReflection}
-            onLoadTafsir={loadTafsir}
-            onLoadAudio={loadAudio}
-            onSaveNote={saveNote}
-            onAddToCollection={addToCollection}
-            onFeedback={setFeedback}
-            onShowAlternate={showAlternate}
-            onShare={copyShareCard}
-          />
-        )}
+          {reflection && captureState === 'ready' && (
+            <AyahVerseCard
+              reflection={reflection}
+              collections={collections}
+              isSaving={isSaving}
+              onSave={saveReflection}
+              onLoadTafsir={loadTafsir}
+              onLoadAudio={loadAudio}
+              onSaveNote={saveNote}
+              onAddToCollection={addToCollection}
+              onFeedback={setFeedback}
+              onShowAlternate={showAlternate}
+              onShare={copyShareCard}
+            />
+          )}
 
-        {message && captureState !== 'error' && <p className="ayah-message">{message}</p>}
+          {message && captureState !== 'error' && <p className="ayah-message">{message}</p>}
+        </div>
 
         <footer className="ayah-capture-footer">
-          <button type="button" className="ayah-secondary-button" onClick={captureReflection} disabled={isCaptureBusy}>
-            Reflect Again
+          <button type="button" className="ayah-footer-action" onClick={captureReflection} disabled={isCaptureBusy}>
+            New capture
           </button>
-          <span><kbd>Esc</kbd> closes</span>
+          <span className="ayah-footer-hint"><kbd>Esc</kbd> closes</span>
         </footer>
       </section>
     </div>

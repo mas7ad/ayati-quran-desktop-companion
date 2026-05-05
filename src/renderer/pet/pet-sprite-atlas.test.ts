@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { AYAH_ATLAS, getClipFps, getClipFrameSource } from './pet-sprite-atlas';
+import {
+  AYAH_ATLAS,
+  BASE_ATLAS_CLIP_IDS,
+  getClipFps,
+  getClipFrameSource,
+  getClipPlayDurationMs,
+  POKE_REACTION_CLIPS,
+} from './pet-sprite-atlas';
 
 describe('AYAH_ATLAS', () => {
   it('describes the real Ayah spritesheet frame grid', () => {
@@ -42,6 +49,16 @@ describe('AYAH_ATLAS', () => {
     expect(source.columns).toBe(AYAH_ATLAS.columns);
     expect(source.expectedImageWidth).toBe(AYAH_ATLAS.sheetWidth);
     expect(source.expectedImageHeight).toBe(AYAH_ATLAS.sheetHeight);
+  });
+
+  it('limits tap/poke reactions to clips defined on the baseline Ayah atlas', () => {
+    for (const clip of BASE_ATLAS_CLIP_IDS) {
+      expect(AYAH_ATLAS.clips[clip]).toBeDefined();
+    }
+    for (const clip of POKE_REACTION_CLIPS) {
+      expect(AYAH_ATLAS.clips[clip]).toBeDefined();
+      expect(getClipPlayDurationMs(clip)).toBeGreaterThan(0);
+    }
   });
 
   it('allows an atlas clip to resolve as its own horizontal strip', () => {

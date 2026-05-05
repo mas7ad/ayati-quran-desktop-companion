@@ -104,7 +104,7 @@ describe('ScreenshotQuestion', () => {
 
     render(<ScreenshotQuestion />);
 
-    const reflectAgainButton = screen.getByRole('button', { name: /reflect again/i });
+    const reflectAgainButton = screen.getByRole('button', { name: /new capture/i });
     expect(reflectAgainButton).toBeDisabled();
 
     await user.click(reflectAgainButton);

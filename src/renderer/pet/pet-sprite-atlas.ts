@@ -146,12 +146,48 @@ export function isPetClipId(value: string): value is PetClipId {
   return CLIP_SET.has(value);
 }
 
+/**
+ * Clips present in the baseline pet atlas (`assets/pets/ayah/atlas.json`). Other appearances may add mood clips;
+ * tap/poke reactions should stick to this set so every skin shows real animation.
+ */
+export const BASE_ATLAS_CLIP_IDS: readonly PetClipId[] = [
+  'idle',
+  'running-right',
+  'running-left',
+  'waving',
+  'jumping',
+  'failed',
+  'waiting',
+  'running',
+  'review',
+];
+
+/**
+ * Tap/poke reactions: real clips only, chosen to read as a response to a click (not sleep/camera/walk-only).
+ */
+export const POKE_REACTION_CLIPS: readonly PetClipId[] = [
+  'waving',
+  'jumping',
+  'failed',
+  'waiting',
+  'running',
+  'running-left',
+  'running-right',
+];
+
 export function getClipRange(clip: PetClipId, atlas: PetSpriteAtlas = AYAH_ATLAS): PetSpriteAtlasClip {
   const range = atlas.clips[clip];
   if (!range) {
     return atlas.clips.idle;
   }
   return range;
+}
+
+/** Wall-clock time for one full loop of a clip at its atlas FPS (for reaction timers). */
+export function getClipPlayDurationMs(clip: PetClipId, atlas: PetSpriteAtlas = AYAH_ATLAS): number {
+  const range = getClipRange(clip, atlas);
+  const fps = range.fps ?? atlas.fps;
+  return Math.round((1000 / Math.max(1, fps)) * Math.max(1, range.length));
 }
 
 export function getClipFps(clip: PetClipId, atlas: PetSpriteAtlas = AYAH_ATLAS): number {

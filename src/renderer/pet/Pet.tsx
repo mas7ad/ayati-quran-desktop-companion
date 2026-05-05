@@ -5,9 +5,9 @@ import {
   isSleepVisualState,
   normalizeIncomingPetState,
   resolveSpriteClip,
-  type LegacyMood,
   type PetVisualState,
 } from './pet-sprite-logic';
+import { getClipPlayDurationMs, POKE_REACTION_CLIPS } from './pet-sprite-atlas';
 import { TutorialOverlay } from './TutorialOverlay';
 
 type IdleBehavior = 'blink' | 'look_around' | 'snip_claws' | 'yawn' | 'stretch' | 'wiggle' | 'wander' | null;
@@ -385,30 +385,7 @@ export const Pet: React.FC = () => {
     document.addEventListener('mouseup', handleDocumentMouseUp);
   }, []);
 
-  // Poke reactions - random animations when clicked
-  const pokeReactions: Array<{ mood?: LegacyMood; behavior?: IdleBehavior; duration: number }> = [
-    // Happy reactions
-    { mood: 'happy', duration: 1500 },
-    { mood: 'excited', duration: 1500 },
-    { mood: 'proud', duration: 1800 },      // feeling smug
-    { mood: 'spin', duration: 1000 },       // celebratory spin!
-    // Curious/playful
-    { mood: 'curious', duration: 1200 },
-    { behavior: 'snip_claws', duration: 1500 },
-    { behavior: 'wiggle', duration: 1200 },
-    // Surprised reactions
-    { mood: 'startle', duration: 1200 },    // startled by the poke
-    // Annoyed/grumpy reactions
-    { mood: 'thinking', duration: 1500 },   // worried/annoyed face
-    { mood: 'mad', duration: 1500 },        // arms crossed, annoyed
-    { behavior: 'yawn', duration: 2500 },   // bored yawn
-    // Neutral
-    { behavior: 'stretch', duration: 2000 },
-    { behavior: 'look_around', duration: 2000 },
-    { behavior: 'blink', duration: 400 },
-  ];
-
-  // Single click = poke animation
+  // Single click = poke animation (only atlas clips present on every skin — see POKE_REACTION_CLIPS)
   const handleClick = useCallback(() => {
     if (didDragRef.current) return;
 
@@ -424,24 +401,14 @@ export const Pet: React.FC = () => {
       return;
     }
 
-    // Pick a random reaction
-    const reaction = pokeReactions[Math.floor(Math.random() * pokeReactions.length)];
-
-    if (reaction.mood) {
-      setPetVisualState(reaction.mood);
-      setTimeout(() => {
-        if (!sleepLockedRef.current) {
-          setPetVisualState('idle');
-        }
-      }, reaction.duration);
-    } else if (reaction.behavior) {
-      setIdleBehavior(reaction.behavior);
-      setTimeout(() => {
-        if (!sleepLockedRef.current) {
-          setIdleBehavior(null);
-        }
-      }, reaction.duration);
-    }
+    const clip = POKE_REACTION_CLIPS[Math.floor(Math.random() * POKE_REACTION_CLIPS.length)];
+    const duration = getClipPlayDurationMs(clip);
+    setPetVisualState(clip);
+    setTimeout(() => {
+      if (!sleepLockedRef.current) {
+        setPetVisualState('idle');
+      }
+    }, duration);
 
     // Notify main process (optional - for sound effects or other reactions)
     window.ayati.petClicked?.();

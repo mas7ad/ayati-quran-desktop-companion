@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AyahCollection, AyahReflection } from '../../main/ayah-types';
 import { QulArabicText } from '../components/QulArabicText';
@@ -9,7 +9,7 @@ interface AyahVerseCardProps {
   isSaving?: boolean;
   onSave: () => void;
   onLoadTafsir?: () => Promise<void> | void;
-  onLoadAudio?: () => Promise<void> | void;
+  onLoadAudio?: () => Promise<AyahReflection | null | void>;
   onSaveNote?: (body: string) => Promise<void> | void;
   onAddToCollection?: (collectionId: string) => Promise<void> | void;
   onFeedback?: (value: 'relevant' | 'not_relevant') => Promise<void> | void;
@@ -25,7 +25,17 @@ function getSaveLabel(reflection: AyahReflection, isSaving: boolean): string {
   return 'Save Bookmark';
 }
 
-type ActionKey = 'tafsir' | 'audio' | 'note' | 'collection' | 'feedback' | 'alternate' | 'share';
+type ActionKey = 'tafsir' | 'note' | 'collection' | 'feedback' | 'alternate' | 'share';
+
+function pauseAyahReflectionAudio(audio: HTMLAudioElement | null): void {
+  if (!audio) return;
+  try {
+    audio.pause();
+  } catch {
+    // JSDOM may not implement media pause.
+  }
+}
+
 const TAFSIR_PARAGRAPH_TARGET_LENGTH = 170;
 
 export function getTafsirParagraphs(text: string): string[] {
@@ -78,11 +88,105 @@ export function AyahVerseCard({
 }: AyahVerseCardProps): JSX.Element {
   const isSaved = Boolean(reflection.savedAt) || reflection.syncState === 'synced' || reflection.syncState === 'pending';
   const [isTafsirOpen, setIsTafsirOpen] = useState(false);
-  const [isAudioOpen, setIsAudioOpen] = useState(false);
   const [noteBody, setNoteBody] = useState(reflection.note?.body ?? '');
   const [busyAction, setBusyAction] = useState<ActionKey | null>(null);
   const [statusMessage, setStatusMessage] = useState('');
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const [isAudioLoading, setIsAudioLoading] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const tafsirParagraphs = reflection.tafsir?.text ? getTafsirParagraphs(reflection.tafsir.text) : [];
+
+  useEffect(() => {
+    setNoteBody(reflection.note?.body ?? '');
+  }, [reflection.id, reflection.note?.body]);
+
+  useEffect(() => {
+    pauseAyahReflectionAudio(audioRef.current);
+    audioRef.current = null;
+    setIsAudioPlaying(false);
+    setIsAudioLoading(false);
+  }, [reflection.id]);
+
+  useEffect(() => {
+    return () => {
+      pauseAyahReflectionAudio(audioRef.current);
+      audioRef.current = null;
+    };
+  }, []);
+
+  const startPlayback = useCallback(async (url: string) => {
+    pauseAyahReflectionAudio(audioRef.current);
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    audio.addEventListener('ended', () => setIsAudioPlaying(false));
+    audio.addEventListener('pause', () => setIsAudioPlaying(false));
+    try {
+      await audio.play();
+      setIsAudioPlaying(true);
+    } catch {
+      setStatusMessage('Could not start playback.');
+      setIsAudioPlaying(false);
+    }
+  }, []);
+
+  const handleReciteClick = useCallback(async () => {
+    if (isAudioLoading) return;
+
+    if (isAudioPlaying) {
+      pauseAyahReflectionAudio(audioRef.current);
+      setIsAudioPlaying(false);
+      return;
+    }
+
+    if (audioRef.current && audioRef.current.paused && !audioRef.current.ended) {
+      try {
+        await audioRef.current.play();
+        setIsAudioPlaying(true);
+      } catch {
+        setStatusMessage('Could not start playback.');
+      }
+      return;
+    }
+
+    if (audioRef.current?.ended) {
+      audioRef.current.currentTime = 0;
+      try {
+        await audioRef.current.play();
+        setIsAudioPlaying(true);
+      } catch {
+        setStatusMessage('Could not start playback.');
+      }
+      return;
+    }
+
+    const existingUrl = reflection.audio?.url;
+    if (existingUrl) {
+      setStatusMessage('');
+      await startPlayback(existingUrl);
+      return;
+    }
+
+    if (!onLoadAudio) {
+      setStatusMessage('Recitation is not available yet.');
+      return;
+    }
+
+    setIsAudioLoading(true);
+    setStatusMessage('');
+    try {
+      const updated = await onLoadAudio();
+      const fetchedUrl = updated?.audio?.url;
+      if (!fetchedUrl) {
+        setStatusMessage('Recitation is not available yet.');
+        return;
+      }
+      await startPlayback(fetchedUrl);
+    } catch {
+      setStatusMessage('Could not load recitation.');
+    } finally {
+      setIsAudioLoading(false);
+    }
+  }, [isAudioLoading, isAudioPlaying, onLoadAudio, reflection.audio?.url, startPlayback]);
 
   const runAction = async (key: ActionKey, action?: () => Promise<void> | void, successMessage?: string) => {
     if (!action) return;
@@ -103,16 +207,20 @@ export function AyahVerseCard({
     void runAction('tafsir', onLoadTafsir);
   };
 
-  const handleAudioClick = () => {
-    setIsAudioOpen((current) => !current);
-    void runAction('audio', onLoadAudio);
-  };
+  const reciteButtonLabel = isAudioLoading ? 'Loading…' : isAudioPlaying ? 'Pause' : 'Recite';
+
+  const syncBadge =
+    reflection.syncState === 'local' || reflection.syncState === 'pending' ? (
+      <span className={`ayah-sync-state ayah-sync-${reflection.syncState}`}>
+        {reflection.syncState === 'local' ? 'Local only' : 'Sync pending'}
+      </span>
+    ) : null;
 
   return (
     <article className="ayah-card" translate="no">
       <div className="ayah-card-header">
         <span className="ayah-reference">{reflection.surahName} {reflection.verseKey}</span>
-        <span className={`ayah-sync-state ayah-sync-${reflection.syncState}`}>{reflection.syncState}</span>
+        {syncBadge}
       </div>
 
       <QulArabicText
@@ -125,11 +233,14 @@ export function AyahVerseCard({
       <p className="ayah-translation">{reflection.translation}</p>
 
       <div className="ayah-reflection-copy">
-        <p>{reflection.reflection}</p>
-        <p><strong>Why this verse:</strong> {reflection.whyThisVerse}</p>
+        <p className="ayah-reflection-lead">{reflection.reflection}</p>
+        <details className="ayah-details ayah-why-details">
+          <summary className="ayah-details-summary">Why this verse</summary>
+          <p className="ayah-why-body">{reflection.whyThisVerse}</p>
+        </details>
       </div>
 
-      <div className="ayah-action-grid">
+      <div className="ayah-actions-primary">
         <button
           type="button"
           className="ayah-save-button"
@@ -138,39 +249,51 @@ export function AyahVerseCard({
         >
           {getSaveLabel(reflection, isSaving)}
         </button>
+      </div>
+
+      <div className="ayah-toolbar" role="toolbar" aria-label="Reflection tools">
         <button
           type="button"
-          className="ayah-secondary-button"
+          className="ayah-toolbar-button"
           onClick={handleTafsirClick}
           disabled={busyAction === 'tafsir'}
+          aria-expanded={isTafsirOpen}
         >
-          {isTafsirOpen ? 'Hide Tafsir' : 'Show Tafsir'}
+          {isTafsirOpen ? 'Hide tafsir' : 'Tafsir'}
         </button>
         <button
           type="button"
-          className="ayah-secondary-button"
-          onClick={handleAudioClick}
-          disabled={busyAction === 'audio'}
+          className="ayah-toolbar-button"
+          onClick={() => void handleReciteClick()}
+          disabled={isAudioLoading}
+          aria-busy={isAudioLoading}
+          aria-pressed={isAudioPlaying}
         >
-          {isAudioOpen ? 'Hide Recitation' : 'Play Recitation'}
+          {reciteButtonLabel}
         </button>
         <button
           type="button"
-          className="ayah-secondary-button"
+          className="ayah-toolbar-button"
           onClick={() => runAction('alternate', onShowAlternate)}
           disabled={!onShowAlternate || busyAction === 'alternate'}
         >
-          Show Another Ayah
+          Other ayah
         </button>
         <button
           type="button"
-          className="ayah-secondary-button"
+          className="ayah-toolbar-button"
           onClick={() => runAction('share', onShare, 'Share card copied.')}
           disabled={!onShare || busyAction === 'share'}
         >
-          Copy Share Card
+          Copy card
         </button>
       </div>
+
+      {reflection.audio?.reciterName ? (
+        <p className="ayah-recite-meta" translate="no">
+          {reflection.audio.reciterName}
+        </p>
+      ) : null}
 
       {isTafsirOpen && (
         <section className="ayah-expandable-panel" aria-label="Tafsir">
@@ -190,78 +313,70 @@ export function AyahVerseCard({
         </section>
       )}
 
-      {isAudioOpen && (
-        <section className="ayah-expandable-panel" aria-label="Recitation">
-          <div className="ayah-panel-heading">
-            <strong>Recitation</strong>
-            {reflection.audio?.reciterName && <span>{reflection.audio.reciterName}</span>}
+      <details className="ayah-details ayah-extras-details">
+        <summary className="ayah-details-summary">Note, collection, feedback</summary>
+        <div className="ayah-extras-body">
+          <section className="ayah-note-panel">
+            <label htmlFor={`ayah-note-${reflection.id}`}>Note</label>
+            <textarea
+              id={`ayah-note-${reflection.id}`}
+              value={noteBody}
+              onChange={(event) => setNoteBody(event.target.value)}
+              placeholder="Optional..."
+              rows={2}
+            />
+            <button
+              type="button"
+              className="ayah-secondary-button ayah-extras-button"
+              onClick={() => runAction('note', () => onSaveNote?.(noteBody), 'Note saved.')}
+              disabled={!onSaveNote || busyAction === 'note' || noteBody.trim().length < 6}
+            >
+              Save note
+            </button>
+            {reflection.note?.syncState && (
+              <span className="ayah-inline-state">Note {reflection.note.syncState}</span>
+            )}
+          </section>
+
+          <div className="ayah-form-row">
+            <label htmlFor={`ayah-collection-${reflection.id}`}>Collection</label>
+            <select
+              id={`ayah-collection-${reflection.id}`}
+              defaultValue=""
+              onChange={(event) => {
+                if (!event.target.value) return;
+                void runAction('collection', () => onAddToCollection?.(event.target.value), 'Collection updated.');
+              }}
+              disabled={!onAddToCollection || busyAction === 'collection' || collections.length === 0}
+            >
+              <option value="">Choose…</option>
+              {collections.map((collection) => (
+                <option key={collection.id} value={collection.id}>{collection.name}</option>
+              ))}
+            </select>
           </div>
-          {reflection.audio?.url ? (
-            <audio aria-label="Recitation audio" controls src={reflection.audio.url} />
-          ) : (
-            <p>{busyAction === 'audio' ? 'Loading recitation...' : 'Recitation is not available yet.'}</p>
-          )}
-        </section>
-      )}
 
-      <section className="ayah-note-panel">
-        <label htmlFor={`ayah-note-${reflection.id}`}>Reflection Note</label>
-        <textarea
-          id={`ayah-note-${reflection.id}`}
-          value={noteBody}
-          onChange={(event) => setNoteBody(event.target.value)}
-          placeholder="Add a short note..."
-          rows={3}
-        />
-        <button
-          type="button"
-          className="ayah-secondary-button"
-          onClick={() => runAction('note', () => onSaveNote?.(noteBody), 'Note saved.')}
-          disabled={!onSaveNote || busyAction === 'note' || noteBody.trim().length < 6}
-        >
-          Save Note
-        </button>
-        {reflection.note?.syncState && (
-          <span className="ayah-inline-state">Note {reflection.note.syncState}</span>
-        )}
-      </section>
-
-      <div className="ayah-form-row">
-        <label htmlFor={`ayah-collection-${reflection.id}`}>Save To Collection</label>
-        <select
-          id={`ayah-collection-${reflection.id}`}
-          defaultValue=""
-          onChange={(event) => {
-            if (!event.target.value) return;
-            void runAction('collection', () => onAddToCollection?.(event.target.value), 'Collection updated.');
-          }}
-          disabled={!onAddToCollection || busyAction === 'collection' || collections.length === 0}
-        >
-          <option value="">Choose collection</option>
-          {collections.map((collection) => (
-            <option key={collection.id} value={collection.id}>{collection.name}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="ayah-feedback-row" aria-label="Relevance feedback">
-        <button
-          type="button"
-          className={reflection.feedback?.value === 'relevant' ? 'ayah-feedback-active' : 'ayah-secondary-button'}
-          onClick={() => runAction('feedback', () => onFeedback?.('relevant'), 'Feedback saved.')}
-          disabled={!onFeedback || busyAction === 'feedback'}
-        >
-          Relevant
-        </button>
-        <button
-          type="button"
-          className={reflection.feedback?.value === 'not_relevant' ? 'ayah-feedback-active' : 'ayah-secondary-button'}
-          onClick={() => runAction('feedback', () => onFeedback?.('not_relevant'), 'Feedback saved.')}
-          disabled={!onFeedback || busyAction === 'feedback'}
-        >
-          Not Relevant
-        </button>
-      </div>
+          <div className="ayah-feedback-row" aria-label="Relevance feedback">
+            <span className="ayah-feedback-label">Fit?</span>
+            <button
+              type="button"
+              className={reflection.feedback?.value === 'relevant' ? 'ayah-feedback-active ayah-feedback-compact' : 'ayah-secondary-button ayah-feedback-compact'}
+              onClick={() => runAction('feedback', () => onFeedback?.('relevant'), 'Feedback saved.')}
+              disabled={!onFeedback || busyAction === 'feedback'}
+            >
+              Yes
+            </button>
+            <button
+              type="button"
+              className={reflection.feedback?.value === 'not_relevant' ? 'ayah-feedback-active ayah-feedback-compact' : 'ayah-secondary-button ayah-feedback-compact'}
+              onClick={() => runAction('feedback', () => onFeedback?.('not_relevant'), 'Feedback saved.')}
+              disabled={!onFeedback || busyAction === 'feedback'}
+            >
+              No
+            </button>
+          </div>
+        </div>
+      </details>
 
       {isSaved && reflection.syncState !== 'synced' && (
         <p className="ayah-save-note">Sign in to sync this bookmark with Quran Foundation.</p>

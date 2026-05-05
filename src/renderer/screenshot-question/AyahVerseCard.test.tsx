@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -43,15 +43,18 @@ describe('AyahVerseCard', () => {
   });
 
   it('renders Arabic, translation, reference, why line, and save action', async () => {
+    const user = userEvent.setup();
     const handleSave = vi.fn();
     render(<AyahVerseCard reflection={reflection} onSave={handleSave} />);
 
     expect(screen.getByText(reflection.arabicText)).toHaveAttribute('dir', 'rtl');
     expect(screen.getByText(reflection.translation)).toBeInTheDocument();
     expect(screen.getByText('Al-Baqarah 2:286')).toBeInTheDocument();
-    expect(screen.getByText(/The screen suggested stress and pressure/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: /save bookmark/i }));
+    await user.click(screen.getByText('Why this verse'));
+    expect(screen.getByText(/The screen suggested stress and pressure/)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: /save bookmark/i }));
 
     expect(handleSave).toHaveBeenCalledTimes(1);
   });
@@ -66,58 +69,79 @@ describe('AyahVerseCard', () => {
     const handleAlternate = vi.fn().mockResolvedValue(undefined);
     const handleShare = vi.fn().mockResolvedValue(undefined);
 
-    render(
-      <AyahVerseCard
-        reflection={{
-          ...reflection,
-          tafsir: {
-            resourceId: 169,
-            resourceName: 'Tafsir Ibn Kathir',
-            languageName: 'english',
-            text: 'Allah does not burden any soul beyond capacity.',
-            fetchedAt: 1710000000100,
-          },
-          audio: {
-            recitationId: 1,
-            reciterName: 'Mishari Alafasy',
-            url: 'https://verses.quran.foundation/audio.mp3',
-            fetchedAt: 1710000000200,
-          },
-        }}
-        collections={[{ id: 'collection-1', name: 'Work Stress', syncState: 'synced' }]}
-        onSave={vi.fn()}
-        onLoadTafsir={handleLoadTafsir}
-        onLoadAudio={handleLoadAudio}
-        onSaveNote={handleSaveNote}
-        onAddToCollection={handleAddToCollection}
-        onFeedback={handleFeedback}
-        onShowAlternate={handleAlternate}
-        onShare={handleShare}
-      />,
-    );
+    const playSpy = vi.spyOn(HTMLAudioElement.prototype, 'play').mockResolvedValue(undefined);
+    const pauseSpy = vi.spyOn(HTMLAudioElement.prototype, 'pause').mockImplementation(() => {});
 
-    await user.click(screen.getByRole('button', { name: /show tafsir/i }));
-    expect(handleLoadTafsir).toHaveBeenCalledTimes(1);
-    expect(screen.getByText(/Allah does not burden any soul/)).toBeInTheDocument();
+    try {
+      render(
+        <AyahVerseCard
+          reflection={{
+            ...reflection,
+            tafsir: {
+              resourceId: 169,
+              resourceName: 'Tafsir Ibn Kathir',
+              languageName: 'english',
+              text: 'Allah does not burden any soul beyond capacity.',
+              fetchedAt: 1710000000100,
+            },
+            audio: {
+              recitationId: 1,
+              reciterName: 'Mishari Alafasy',
+              url: 'https://verses.quran.foundation/audio.mp3',
+              fetchedAt: 1710000000200,
+            },
+          }}
+          collections={[{ id: 'collection-1', name: 'Work Stress', syncState: 'synced' }]}
+          onSave={vi.fn()}
+          onLoadTafsir={handleLoadTafsir}
+          onLoadAudio={handleLoadAudio}
+          onSaveNote={handleSaveNote}
+          onAddToCollection={handleAddToCollection}
+          onFeedback={handleFeedback}
+          onShowAlternate={handleAlternate}
+          onShare={handleShare}
+        />,
+      );
 
-    await user.click(screen.getByRole('button', { name: /play recitation/i }));
-    expect(handleLoadAudio).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText(/recitation audio/i)).toHaveAttribute('src', 'https://verses.quran.foundation/audio.mp3');
+      await user.click(screen.getByRole('button', { name: /^Tafsir$/i }));
+      expect(handleLoadTafsir).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(/Allah does not burden any soul/)).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText(/reflection note/i), 'This helped me slow down.');
-    await user.click(screen.getByRole('button', { name: /save note/i }));
-    expect(handleSaveNote).toHaveBeenCalledWith('This helped me slow down.');
+      await user.click(screen.getByRole('button', { name: /^Recite$/i }));
+      expect(handleLoadAudio).not.toHaveBeenCalled();
+      expect(playSpy).toHaveBeenCalled();
+      expect(screen.getByText('Mishari Alafasy')).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText(/save to collection/i), 'collection-1');
-    expect(handleAddToCollection).toHaveBeenCalledWith('collection-1');
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /^Pause$/i })).toBeInTheDocument();
+      });
 
-    await user.click(screen.getByRole('button', { name: 'Relevant' }));
-    expect(handleFeedback).toHaveBeenCalledWith('relevant');
+      await user.click(screen.getByRole('button', { name: /^Pause$/i }));
+      expect(pauseSpy).toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: /show another ayah/i }));
-    expect(handleAlternate).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /^Recite$/i })).toBeInTheDocument();
+      });
 
-    await user.click(screen.getByRole('button', { name: /copy share card/i }));
-    expect(handleShare).toHaveBeenCalledTimes(1);
+      await user.click(screen.getByText('Note, collection, feedback'));
+      await user.type(screen.getByLabelText(/^Note$/i), 'This helped me slow down.');
+      await user.click(screen.getByRole('button', { name: /^Save note$/i }));
+      expect(handleSaveNote).toHaveBeenCalledWith('This helped me slow down.');
+
+      await user.selectOptions(screen.getByLabelText(/^Collection$/i), 'collection-1');
+      expect(handleAddToCollection).toHaveBeenCalledWith('collection-1');
+
+      await user.click(screen.getByRole('button', { name: 'Yes' }));
+      expect(handleFeedback).toHaveBeenCalledWith('relevant');
+
+      await user.click(screen.getByRole('button', { name: /^Other ayah$/i }));
+      expect(handleAlternate).toHaveBeenCalledTimes(1);
+
+      await user.click(screen.getByRole('button', { name: /^Copy card$/i }));
+      expect(handleShare).toHaveBeenCalledTimes(1);
+    } finally {
+      playSpy.mockRestore();
+      pauseSpy.mockRestore();
+    }
   });
 });

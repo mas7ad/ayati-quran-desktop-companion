@@ -3847,6 +3847,8 @@ function createScreenshotQuestionWindow() {
 
   screenshotQuestionWindow.on('closed', () => {
     screenshotQuestionWindow = null;
+    ayahPendingReflectionEcho = null;
+    ayahPendingReflectionEchoUntil = 0;
   });
 }
 
@@ -4594,7 +4596,11 @@ function setupIPC() {
       ayahPendingReflectionEchoUntil = Date.now() + 12_000;
       return result;
     }
-    if (ayahPendingReflectionEcho && Date.now() < ayahPendingReflectionEchoUntil) {
+    const screenshotWindowOpen = screenshotQuestionWindow && !screenshotQuestionWindow.isDestroyed();
+    if (
+      ayahPendingReflectionEcho
+      && (screenshotWindowOpen || Date.now() < ayahPendingReflectionEchoUntil)
+    ) {
       return ayahPendingReflectionEcho;
     }
     return null;
