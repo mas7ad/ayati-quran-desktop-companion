@@ -12,25 +12,18 @@ interface Props {
 
 export const HotkeysStep: React.FC<Props> = ({ data, updateData }) => {
   return (
-    <div className="min-h-full px-12 pt-12 pb-12">
-      <div className="space-y-3 mb-10">
-        <p className="brand-display text-[10px] font-bold tracking-[0.2em] text-[#67E0A3] uppercase">Step 03</p>
-        <h2 className="text-[32px] font-semibold tracking-tight text-[#1a2a24]">Flow Shortcuts</h2>
-        <p className="text-[15px] text-[#1a2a24]/60 max-w-[440px] leading-relaxed font-medium">
-          Access reflections and chat instantly without breaking your current workflow.
+    <div className="onboarding-step-column">
+      <div className="space-y-3 mb-10 text-left">
+        <p className="onboarding-kicker">Step 02 — Shortcuts</p>
+        <h2 className="onboarding-step-title">Keyboard shortcuts</h2>
+        <p className="onboarding-step-lede">
+          Set global shortcuts to open the assistant and to hide or show Ayati. You can change these later in
+          settings.
         </p>
       </div>
 
-      <div className="space-y-4">
-        <div className="p-2 rounded-[40px] bg-white border border-[#1a2a24]/[0.03]">
-          <HotkeyInput
-            label="Open Chat"
-            description="Summon the quick chat bar"
-            value={data.hotkeyOpenChat}
-            onChange={(value) => updateData({ hotkeyOpenChat: value })}
-            theme="setupInverted"
-          />
-          <div className="h-px bg-[#1a2a24]/[0.05] mx-6" />
+      <div className="overflow-hidden rounded-[36px] border border-[#1a2a24]/[0.08] bg-white shadow-[0_1px_0_rgba(26,42,36,0.04)] divide-y divide-[#1a2a24]/[0.06]">
+        <div className="px-6 py-5 sm:px-7 sm:py-6">
           <HotkeyInput
             label="Open Assistant"
             description="Open the full assistant panel"
@@ -38,15 +31,8 @@ export const HotkeysStep: React.FC<Props> = ({ data, updateData }) => {
             onChange={(value) => updateData({ hotkeyOpenAssistant: value })}
             theme="setupInverted"
           />
-          <div className="h-px bg-[#1a2a24]/[0.05] mx-6" />
-          <HotkeyInput
-            label="Reflect on Screen"
-            description="Capture your screen for a fitting ayah"
-            value={data.hotkeyCaptureScreen}
-            onChange={(value) => updateData({ hotkeyCaptureScreen: value })}
-            theme="setupInverted"
-          />
-          <div className="h-px bg-[#1a2a24]/[0.05] mx-6" />
+        </div>
+        <div className="px-6 py-5 sm:px-7 sm:py-6">
           <HotkeyInput
             label="Hide App"
             description="Hide or show all Ayati windows (same shortcut toggles)"
@@ -58,9 +44,10 @@ export const HotkeysStep: React.FC<Props> = ({ data, updateData }) => {
       </div>
 
       <div className="mt-8 px-5 py-4 bg-[#67E0A3]/[0.05] border border-[#67E0A3]/15 rounded-[24px]">
-        <p className="text-xs text-[#1a2a24]/50 flex items-center gap-3 font-medium">
-          <OnboardingIcon name="mouse" size="1.25rem" className="text-[#67E0A3]" />
-          Click a shortcut and press your desired keys to change it.
+        <p className="brand-ui text-xs text-[#1a2a24]/55 flex items-center gap-3 font-medium leading-snug">
+          <OnboardingIcon name="mouse" size="1.25rem" className="text-[#67E0A3] shrink-0" />
+          Click a shortcut field, then press the combination you want. Click outside the field to leave recording
+          without changing the shortcut.
         </p>
       </div>
     </div>

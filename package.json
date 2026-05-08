@@ -11,7 +11,7 @@
   "bugs": {
     "url": "https://github.com/mwijanarko1/ayati-quran-desktop-companion/issues"
   },
-  "description": "Ayati - Quran Desktop Companion, a Quran-focused screen companion powered by OpenRouter",
+  "description": "Ayati - Quran Desktop Companion, a Quran-focused desktop companion for daily reflection",
   "main": "dist/main/main.js",
   "packageManager": "bun@1.3.10",
   "scripts": {
@@ -101,7 +101,7 @@
         "teamId": "WH4MT5Z44S"
       },
       "extendInfo": {
-        "NSScreenCaptureUsageDescription": "Ayati - Quran Desktop Companion needs screen capture permission to suggest Quran reflections for what is on your screen.",
+        "NSScreenCaptureUsageDescription": "Ayati - Quran Desktop Companion does not use screen capture for Quran reflections.",
         "NSAppleEventsUsageDescription": "Ayati - Quran Desktop Companion needs this to detect which app you're using."
       }
     },

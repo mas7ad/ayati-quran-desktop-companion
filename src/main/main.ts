@@ -33,12 +33,9 @@ import {
   type ClawBotProvider,
 } from './clawbot-client';
 import { createStore } from './store';
-import { TutorialManager } from './tutorial';
 import { getFrontmostWindowTitleFromSystemEvents } from './window-title';
 import { buildContextualQuranNudge, buildTimedQuranReminder } from './ayah-contextual-nudges';
-import { analyzeScreenForAyah } from './ayah-scene-analyzer';
-import { selectAyahCandidateWithAi, shouldUseRankedTopCandidateWithoutAi } from './ayah-ai-selector';
-import { shrinkImageDataUrlForVisionAnalysis } from './ayah-vision-image';
+import { createManualReflectionInsight } from './ayah-manual-reflection';
 import { fetchVerseContentForReflection as fetchVerseContentWithFallback } from './ayah-reflection-content';
 import {
   createDefaultAyahLensState,
@@ -65,6 +62,7 @@ import type {
   QuranAuthStatus,
   QuranStreakSummary,
   QuranVerseContent,
+  ScreenInsight,
   TodoSettings,
 } from './ayah-types';
 import { createPkcePair, QuranFoundationClient, QuranFoundationError, type StoredTokenSet } from './quran-foundation-client';
@@ -83,6 +81,7 @@ import { getDefaultClawBotModel } from './ai-provider-defaults';
 import { DEFAULT_HOTKEYS, sanitizeAccelerator } from './hotkeys';
 import { getAiProviderConfig } from './ai-providers';
 import { getWindowPositionNearAnchor } from './window-positioning';
+import { PET_WINDOW_HEIGHT, PET_WINDOW_WIDTH } from '../shared/pet-window-size';
 import { getAssistantWindowStackingPolicy } from './window-stacking-policy';
 import { enforceSingleInstanceApp } from './single-instance';
 import { selectPreferredWindow } from './window-selection';
@@ -190,7 +189,6 @@ let ayahPendingReflectionEchoUntil = 0;
 let watchers: Watchers | null = null;
 let clawbot: ClawBotClient | null = null;
 const store = createStore();
-const tutorialManager = new TutorialManager(store);
 let quranOAuthSession: { state: string; nonce: string; verifier: string } | null = null;
 const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
   platform: process.platform,
@@ -698,35 +696,15 @@ async function getAyahAudioById(reflectionId: string): Promise<AyahReflection | 
   return nextState.reflections.find((item) => item.id === reflectionId) ?? nextReflection;
 }
 
-async function captureAyahReflection(): Promise<AyahReflection> {
-  isCapturingAyahReflection = true;
-  let capture: Awaited<ReturnType<typeof captureScreenWithContext>> | null = null;
-
-  try {
-    capture = await captureScreenWithContext();
-    if (!capture) {
-      throw new Error('Screen capture was unavailable. Check Screen Recording permission and try again.');
-    }
-    triggerPetCameraSnapFeedback();
-
-    const imageForVision = await shrinkImageDataUrlForVisionAnalysis(capture.image);
-    const insight = await analyzeScreenForAyah(clawbot, imageForVision);
-    const state = getAyahLensState();
-    const candidates = rankAyahCandidates(insight, state.recentVerseKeys, getFeedbackSignals(state));
-    const candidate = shouldUseRankedTopCandidateWithoutAi(candidates)
-      ? candidates[0]
-      : await selectAyahCandidateWithAi(clawbot, insight, candidates);
-    const verse = await fetchVerseContentForReflection(candidate.verseKey);
-    const candidateIndex = Math.max(0, candidates.findIndex((item) => item.verseKey === candidate.verseKey));
-    const reflection = buildAyahReflection(verse, candidate, insight, candidates.map((item) => item.verseKey), candidateIndex);
-    setAyahLensState(saveReflectionLocally(getAyahLensState(), reflection));
-    return reflection;
-  } finally {
-    if (capture) {
-      capture.image = '';
-    }
-    isCapturingAyahReflection = false;
-  }
+async function captureAyahReflection(theme?: unknown): Promise<AyahReflection> {
+  const insight = createManualReflectionInsight(theme);
+  const state = getAyahLensState();
+  const candidates = rankAyahCandidates(insight, state.recentVerseKeys, getFeedbackSignals(state));
+  const candidate = candidates[0];
+  const verse = await fetchVerseContentForReflection(candidate.verseKey);
+  const reflection = buildAyahReflection(verse, candidate, insight, candidates.map((item) => item.verseKey), 0);
+  setAyahLensState(saveReflectionLocally(getAyahLensState(), reflection));
+  return reflection;
 }
 
 async function preparePendingAyahReflectionResult(): Promise<void> {
@@ -742,7 +720,7 @@ async function preparePendingAyahReflectionResult(): Promise<void> {
 function buildAyahReflection(
   verse: QuranVerseContent,
   candidate: ReturnType<typeof rankAyahCandidates>[number],
-  insight: Awaited<ReturnType<typeof analyzeScreenForAyah>>,
+  insight: ScreenInsight,
   rankedCandidateVerseKeys: string[] = [candidate.verseKey],
   sourceCandidateIndex = 0,
   alternateGroupId: string = randomUUID(),
@@ -1215,12 +1193,7 @@ const DEFAULT_TIMED_QURAN_REMINDER_MINUTES = 15;
 let moveAnimation: NodeJS.Timeout | null = null;
 let workspaceRestackTimeout: NodeJS.Timeout | null = null;
 
-// Pet window size constants
-// Minimum 162px to avoid Electron transparency bug on external/4K displays
-const PET_WINDOW_WIDTH = 164;
-const PET_WINDOW_HEIGHT = 164;
-const PET_WINDOW_TUTORIAL_WIDTH = 320;
-const PET_WINDOW_TUTORIAL_HEIGHT = 350;
+// Pet window size: shared constants (minimum safe size for transparent windows)
 const PET_WAKE_FLIGHT_DURATION_MS = 1100;
 const PET_CHAT_MIN_WIDTH = 280;
 const PET_CHAT_MAX_WIDTH = 420;
@@ -2462,44 +2435,12 @@ async function sendChatPopup(
   context?: string,
   windowTitle?: string
 ) {
-  if (!petWindow || !clawbot?.isConnected()) return;
-
-  // Don't show chat popups during tutorial
-  if (tutorialManager?.getStatus().isActive) return;
-
-  try {
-      let prompt: string;
-      switch (trigger) {
-      case 'app_switch':
-        if (!context?.trim()) {
-          return;
-        }
-        prompt = `User is using app name: "${context}". Window title: "${windowTitle?.trim() || '[unavailable]'}". Based on what you know about the user, say something funny that's relevant to the app and/or window title.`;
-        break;
-      case 'idle':
-        prompt = 'The user has been idle for a while. Give a brief, friendly message to check in or suggest a break (1-2 sentences max). Be warm and not pushy.';
-        break;
-      case 'proactive':
-        prompt = context || 'Share a brief, helpful tip with the user.';
-        break;
-    }
-
-    console.log('[ChatPopup] sendChatPopup', { trigger, context, windowTitle, prompt });
-    const response = await clawbot.chat(prompt);
-
-    if (response.text && !response.text.includes('error')) {
-      resetInteractionTimer();
-      petWindow.webContents.send('chat-popup', {
-        id: randomUUID(),
-        text: response.text,
-        trigger,
-        quickReplies: ['Thanks!', 'Tell me more', 'Not now'],
-      });
-    }
-  } catch (error) {
-    console.error('Failed to send chat popup:', error);
-  }
+  void trigger;
+  void context;
+  void windowTitle;
+  return;
 }
+
 
 function hasActiveConversationSurface(): boolean {
   return Boolean(
@@ -2517,7 +2458,6 @@ async function maybeSendContextualQuranNudge(
 ): Promise<boolean> {
   if (
     !petWindow
-    || tutorialManager?.getStatus().isActive
     || isCapturingAyahReflection
     || (!options.force && hasActiveConversationSurface())
   ) {
@@ -2571,14 +2511,11 @@ async function maybeSendContextualQuranNudge(
 async function maybeSendTimedQuranReminder(options: { force?: boolean } = {}): Promise<boolean> {
   if (
     !petWindow
-    || (!options.force && tutorialManager?.getStatus().isActive)
     || (!options.force && isCapturingAyahReflection)
     || (!options.force && hasActiveConversationSurface())
   ) {
     return false;
   }
-
-  const petChatDemoOpts = options.force ? { bypassTutorial: true as const } : undefined;
 
   const state = getAyahLensState();
   if (!options.force && isInsidePrayerQuietWindow({
@@ -2612,7 +2549,6 @@ async function maybeSendTimedQuranReminder(options: { force?: boolean } = {}): P
         text: `Quran Foundation error: ${message}`,
         quickReplies: ['Got it', 'Not now'],
       },
-      petChatDemoOpts,
     );
     return false;
   }
@@ -2625,7 +2561,7 @@ async function maybeSendTimedQuranReminder(options: { force?: boolean } = {}): P
   }, result.reflection);
   setAyahLensState(nextState);
   resetInteractionTimer();
-  showPetChat(result.message, petChatDemoOpts);
+  showPetChat(result.message);
   if (!isSleeping) {
     petWindow.webContents.send('clawbot-mood', { state: 'curious', reason: 'timer reminder' });
   }
@@ -2652,7 +2588,7 @@ function scheduleTimedQuranReminders(): void {
 }
 
 async function maybeSendPrayerReminder(): Promise<boolean> {
-  if (!petWindow || tutorialManager?.getStatus().isActive || isCapturingAyahReflection || hasActiveConversationSurface()) {
+  if (!petWindow || isCapturingAyahReflection || hasActiveConversationSurface()) {
     return false;
   }
 
@@ -2693,7 +2629,7 @@ async function maybeSendPrayerReminder(): Promise<boolean> {
 }
 
 function maybeSendTodoReminder(): boolean {
-  if (!petWindow || tutorialManager?.getStatus().isActive || isCapturingAyahReflection || hasActiveConversationSurface()) {
+  if (!petWindow || isCapturingAyahReflection || hasActiveConversationSurface()) {
     return false;
   }
   const state = getAyahLensState();
@@ -2723,7 +2659,6 @@ function maybeCompletePomodoro(): boolean {
   const completedPomodoro = completePomodoroSession(state.pomodoro, Date.now());
   const shouldAnnounce = completedPomodoro.settings.petRemindersEnabled
     && !completedPomodoro.sentCompletionIds.includes(dueSession.id)
-    && !tutorialManager?.getStatus().isActive
     && !isCapturingAyahReflection;
   setAyahLensState({
     ...state,
@@ -2968,51 +2903,11 @@ function resetIdleTimer() {
   lastActivityTime = Date.now();
 }
 
-// Expand pet window for tutorial (to show speech bubble)
-function expandPetWindowForTutorial(): void {
-  if (!petWindow) return;
-
-  const [currentX, currentY] = petWindow.getPosition();
-  const { height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
-
-  // Calculate new position to keep pet at same visual location
-  // The pet will be at the bottom of the expanded window
-  const newY = currentY - (PET_WINDOW_TUTORIAL_HEIGHT - PET_WINDOW_HEIGHT);
-  const newX = currentX - (PET_WINDOW_TUTORIAL_WIDTH - PET_WINDOW_WIDTH) / 2;
-
-  // Ensure window stays on screen
-  const safeY = Math.max(0, newY);
-  const safeX = Math.max(0, newX);
-
-  petWindow.setSize(PET_WINDOW_TUTORIAL_WIDTH, PET_WINDOW_TUTORIAL_HEIGHT);
-  petWindow.setPosition(Math.round(safeX), Math.round(safeY));
-  updateScreenshotQuestionPosition();
-  updateWorkspaceBrowserPosition();
-  updatePetPomodoroTimerPosition();
-  petWindow.webContents.send('tutorial-window-expanded', true);
-  console.log('[Tutorial] Pet window expanded for tutorial');
-}
-
-// Contract pet window back to normal size
-function contractPetWindow(): void {
-  if (!petWindow) return;
-
-  const [currentX, currentY] = petWindow.getPosition();
-
-  // Calculate new position to keep pet at same visual location
-  const newY = currentY + (PET_WINDOW_TUTORIAL_HEIGHT - PET_WINDOW_HEIGHT);
-  const newX = currentX + (PET_WINDOW_TUTORIAL_WIDTH - PET_WINDOW_WIDTH) / 2;
-
-  petWindow.setSize(PET_WINDOW_WIDTH, PET_WINDOW_HEIGHT);
-  petWindow.setPosition(Math.round(newX), Math.round(newY));
-  updateScreenshotQuestionPosition();
-  updateWorkspaceBrowserPosition();
-  updatePetPomodoroTimerPosition();
-  petWindow.webContents.send('tutorial-window-expanded', false);
-  console.log('[Tutorial] Pet window contracted to normal');
-}
-
 function createPetWindow() {
+  if (petWindow && !petWindow.isDestroyed()) {
+    return;
+  }
+
   const primary = screen.getPrimaryDisplay();
   const { workArea } = primary;
 
@@ -3108,12 +3003,9 @@ function showPetChat(
     arabicText?: string;
     footerText?: string;
   },
-  options: { bypassTutorial?: boolean } = {},
 ) {
   if (!petWindow) return;
 
-  // Don't show chat popups during tutorial (dev forced reminders may bypass for demos)
-  if (!options.bypassTutorial && tutorialManager?.getStatus().isActive) return;
   isPetChatAudioPlaying = false;
   pendingPetChatReveal = true;
 
@@ -3426,7 +3318,7 @@ function reconcileAssistantWindowReference(): void {
   }
 }
 
-function openAssistantOnTab(tab: 'settings' | 'prayers' | 'todos' | 'focus') {
+function openAssistantOnTab(tab: 'settings' | 'prayers' | 'todos' | 'focus' | 'reflections') {
   createAssistantWindow();
   if (!assistantWindow || assistantWindow.isDestroyed()) return;
 
@@ -3436,7 +3328,9 @@ function openAssistantOnTab(tab: 'settings' | 'prayers' | 'todos' | 'focus') {
       ? 'switch-to-prayers'
       : tab === 'todos'
         ? 'switch-to-todos'
-        : 'switch-to-focus';
+        : tab === 'focus'
+          ? 'switch-to-focus'
+          : 'switch-to-reflections';
   const sendTabSwitch = () => {
     if (!assistantWindow || assistantWindow.isDestroyed()) return;
     assistantWindow.webContents.send(channel);
@@ -4087,11 +3981,17 @@ function createOnboardingWindow(): Promise<void> {
 }
 
 function closeOnboardingAndStartApp() {
-  if (onboardingWindow) {
-    onboardingWindow.close();
-    onboardingWindow = null;
+  const win = onboardingWindow;
+  onboardingWindow = null;
+  if (win && !win.isDestroyed()) {
+    // `destroy()` tears down immediately; `close()` can be delayed or feel stuck on frameless windows.
+    win.destroy();
   }
-  startMainApp();
+  try {
+    startMainApp();
+  } catch (error) {
+    console.error('[Onboarding] Failed to start main app after closing setup window:', error);
+  }
 }
 
 function startMainApp() {
@@ -4104,27 +4004,6 @@ function startMainApp() {
     warmChatbarWindow();
     createAssistantWindow({ preloadOnly: true });
   });
-
-  // Set up tutorial manager with pet window
-  if (petWindow) {
-    tutorialManager.setPetWindow(petWindow);
-    tutorialManager.setAnimateMoveTo(animateMoveTo);
-    tutorialManager.setWindowResizeFunctions(expandPetWindowForTutorial, contractPetWindow);
-
-    // Start or resume tutorial after pet window content is loaded
-    petWindow.webContents.once('did-finish-load', () => {
-      setTimeout(() => {
-        if (tutorialManager.shouldShowResumePrompt()) {
-          hidePetChat(); // Hide any existing chat popup during tutorial
-          expandPetWindowForTutorial();
-          petWindow?.webContents.send('tutorial-resume-prompt');
-        } else if (tutorialManager.shouldStartTutorial()) {
-          hidePetChat(); // Hide any existing chat popup during tutorial
-          tutorialManager.start();
-        }
-      }, 500); // Small delay to let pet window settle
-    });
-  }
 
   // Initialize ClawBot client
   const clawbotUrl = store.get('clawbot.url') as string;
@@ -4200,42 +4079,9 @@ function startMainApp() {
     petWindow?.webContents.send('clawbot-mood', data);
   });
 
-  // Listen for cron job results - send to ClawBot for processing
+  // Cron job processing through AI has been removed.
   clawbot.on('cronResult', async (data) => {
-    console.log('[Main] Cron result received:', data.jobName, '- sending to ClawBot for processing');
-
-    if (!clawbot) return;
-
-    // Send the cron instruction to ClawBot and get its response
-    const response = await clawbot.chat(`[Scheduled reminder: ${data.jobName}] ${data.summary}`);
-
-    if (response.text) {
-      const processedData = {
-        ...data,
-        summary: response.text, // Replace instruction with AI response
-      };
-
-      // Send to assistant window and chatbar for chat history
-      assistantWindow?.webContents.send('cron-result', processedData);
-      chatbarWindow?.webContents.send('cron-result', processedData);
-
-      // Show pet chat popup directly (don't rely on petWindow forwarding)
-      if (!tutorialManager?.getStatus().isActive) {
-        showPetChat({
-          id: randomUUID(),
-          text: response.text,
-          quickReplies: ['Thanks!', 'Snooze', 'Dismiss'],
-        });
-        if (!isSleeping) {
-          petWindow?.webContents.send('clawbot-mood', { state: 'excited', reason: 'cron reminder' });
-        }
-      }
-
-      // Handle any actions from the response
-      if (response.action) {
-        executePetAction(response.action.payload as PetAction);
-      }
-    }
+    assistantWindow?.webContents.send('cron-result', data);
   });
 
   clawbot.on('cronError', (data) => {
@@ -4364,7 +4210,6 @@ function setupIPC() {
         text: `${label} is coming up at ${time}. Take a moment to prepare.`,
         quickReplies: ['Got it', 'Open Prayers', 'Not now'],
       },
-      { bypassTutorial: true },
     );
     if (!isSleeping) {
       petWindow.webContents.send('clawbot-mood', { state: 'curious', reason: 'prayer reminder' });
@@ -4381,7 +4226,6 @@ function setupIPC() {
         text: 'Task reminder: Review PR 3',
         quickReplies: ['Done', 'Open To Do', 'Not now'],
       },
-      { bypassTutorial: true },
     );
     if (!isSleeping) {
       petWindow.webContents.send('clawbot-mood', { state: 'curious', reason: 'todo reminder' });
@@ -4392,7 +4236,7 @@ function setupIPC() {
 
   // Toggle chatbar window
   ipcMain.on('toggle-chatbar', () => {
-    toggleChatbarWindow();
+    openAssistantOnTab('prayers');
   });
 
   // Close chatbar window
@@ -4409,7 +4253,7 @@ function setupIPC() {
 
   // Toggle screenshot question window
   ipcMain.on('toggle-screenshot-question', () => {
-    toggleScreenshotQuestionWindow();
+    openAssistantOnTab('reflections');
   });
 
   // Close screenshot question window
@@ -4418,25 +4262,8 @@ function setupIPC() {
   });
 
   // Ask about screen (screenshot + question)
-  ipcMain.handle('ask-about-screen', async (_event, question: string, imageDataUrl: string) => {
-    console.log('[ScreenshotQuestion] ask-about-screen called');
-    console.log('[ScreenshotQuestion] Question:', question);
-    console.log('[ScreenshotQuestion] Image size:', imageDataUrl?.length || 0, 'chars');
-
-    if (!clawbot) {
-      console.log('[ScreenshotQuestion] ClawBot not connected!');
-      return { error: 'ClawBot not connected' };
-    }
-
-    try {
-      console.log('[ScreenshotQuestion] Calling analyzeScreen...');
-      const response = await clawbot.analyzeScreen(imageDataUrl, question);
-      console.log('[ScreenshotQuestion] Response:', response);
-      return response;
-    } catch (error) {
-      console.error('Failed to analyze screen:', error);
-      return { error: 'Failed to analyze screenshot' };
-    }
+  ipcMain.handle('ask-about-screen', async () => {
+    return { error: 'Screen analysis has been removed from Ayati.' };
   });
 
   // Open external URL
@@ -4635,8 +4462,8 @@ function setupIPC() {
     return true;
   });
 
-  ipcMain.handle('ayah-capture-reflection', async () => {
-    return await captureAyahReflection();
+  ipcMain.handle('ayah-capture-reflection', async (_event, theme?: unknown) => {
+    return await captureAyahReflection(theme);
   });
 
   ipcMain.handle('ayah-pending-reflection-result', async () => {
@@ -4993,11 +4820,7 @@ function setupIPC() {
 
   // Screen capture
   ipcMain.handle('capture-screen', async () => {
-    const image = await captureScreen();
-    if (image) {
-      triggerPetCameraSnapFeedback();
-    }
-    return image;
+    return null;
   });
 
   // Build chat payload with history and optional screen context
@@ -5028,7 +4851,7 @@ function setupIPC() {
   const maybeShowPetResponse = (responseText?: string) => {
     const assistantActive = assistantWindow && assistantWindow.isVisible();
     const chatbarActive = chatbarWindow && chatbarWindow.isVisible();
-    if (responseText && !responseText.includes('error') && petWindow && !assistantActive && !chatbarActive && !tutorialManager?.getStatus().isActive) {
+    if (responseText && !responseText.includes('error') && petWindow && !assistantActive && !chatbarActive) {
       petWindow.webContents.send('chat-popup', {
         id: randomUUID(),
         text: responseText,
@@ -5039,73 +4862,13 @@ function setupIPC() {
   };
 
   // Send message to ClawBot (with optional screen context)
-  ipcMain.handle('send-to-clawbot', async (_event, message: string, includeScreen?: boolean) => {
-    if (!clawbot) return { error: 'ClawBot not connected' };
-
-    resetInteractionTimer(); // User is chatting
-
-    const { history, fullMessage } = await buildClawbotChatPayload(message, includeScreen);
-
-    const response = await clawbot.chat(fullMessage, history);
-
-    // Handle any actions in the response
-    if (response.action?.payload) {
-      await executePetAction(response.action.payload as PetAction);
-    }
-
-    maybeShowPetResponse(response.text);
-
-    return response;
+  ipcMain.handle('send-to-clawbot', async () => {
+    return { error: 'Chat has been removed from Ayati.' };
   });
 
   // Start streaming a message to ClawBot and emit chunk/end/error events
-  ipcMain.handle('start-clawbot-stream', async (event, message: string, includeScreen?: boolean) => {
-    const clawbotClient = clawbot;
-    if (!clawbotClient) return { error: 'ClawBot not connected' };
-
-    resetInteractionTimer();
-
-    const requestId = randomUUID();
-    const sender = event.sender;
-    const isChatbarRequest = Boolean(
-      chatbarWindow &&
-      !chatbarWindow.isDestroyed() &&
-      chatbarWindow.webContents.id === sender.id
-    );
-
-    const runStream = async () => {
-      try {
-        const { history, fullMessage } = await buildClawbotChatPayload(message, includeScreen);
-        const response = await clawbotClient.chatStream(fullMessage, history, {
-          onDelta: (delta, text) => {
-            if (!sender.isDestroyed()) {
-              sender.send('clawbot-stream-chunk', { requestId, delta, text });
-            }
-          },
-        });
-
-        if (response.action?.payload) {
-          await executePetAction(response.action.payload as PetAction);
-        }
-
-        if (!isChatbarRequest) {
-          maybeShowPetResponse(response.text);
-        }
-
-        if (!sender.isDestroyed()) {
-          sender.send('clawbot-stream-end', { requestId, response });
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error('Failed to stream from ClawBot:', error);
-        if (!sender.isDestroyed()) {
-          sender.send('clawbot-stream-error', { requestId, error: errorMessage });
-        }
-      }
-    };
-
-    void runStream();
-    return { requestId };
+  ipcMain.handle('start-clawbot-stream', async () => {
+    return { error: 'Chat has been removed from Ayati.' };
   });
 
   // Get screen context (cursor position, pet position, etc.)
@@ -5115,11 +4878,7 @@ function setupIPC() {
 
   // Capture screen with context
   ipcMain.handle('capture-screen-with-context', async () => {
-    const result = await captureScreenWithContext();
-    if (result) {
-      triggerPetCameraSnapFeedback();
-    }
-    return result;
+    return null;
   });
 
   // Execute pet action directly
@@ -5143,10 +4902,7 @@ function setupIPC() {
 
   // Get ClawBot status (returns detailed status)
   ipcMain.handle('clawbot-status', () => {
-    if (clawbot) {
-      return clawbot.getConnectionStatus();
-    }
-    return { connected: false, error: 'ClawBot not initialized', gatewayUrl: '' };
+    return { connected: false, error: 'Chat has been removed from Ayati.', gatewayUrl: '' };
   });
 
   // Copy text to clipboard
@@ -5291,10 +5047,6 @@ function setupIPC() {
   // Reset onboarding (for testing)
   ipcMain.handle('reset-onboarding', () => {
     resetOnboardingState();
-    // Also reset tutorial so it starts fresh after onboarding
-    store.set('tutorial.completedAt', null);
-    store.set('tutorial.lastStep', 0);
-    store.set('tutorial.wasInterrupted', false);
     app.relaunch();
     app.exit(0);
     return true;
@@ -5302,50 +5054,32 @@ function setupIPC() {
 
   ipcMain.handle('onboarding-complete', (_event, data: {
     launchOnStartup: boolean;
-    aiProvider?: ClawBotProvider;
-    gatewayUrl: string;
-    gatewayToken: string;
-    gatewayModel?: string;
     watchFolders: string[];
     watchActiveApp: boolean;
     watchWindowTitles: boolean;
-    hotkeyOpenChat: string;
-    hotkeyCaptureScreen: string;
     hotkeyOpenAssistant: string;
     hotkeyHideApp: string;
   }) => {
-    // Save onboarding data to store
-    store.set('onboarding.completed', true);
-
-    // Reset tutorial state so it starts fresh after onboarding
-    store.set('tutorial.completedAt', null);
-    store.set('tutorial.lastStep', 0);
-    store.set('tutorial.wasInterrupted', false);
-    store.set('onboarding.workspaceType', 'ayati');
-    const workspacePath = (store.get('onboarding.ayatiWorkspacePath') as string | null)
-      ?? getDefaultAyahLensWorkspacePath();
-    fs.mkdirSync(workspacePath, { recursive: true });
-    store.set('onboarding.ayatiWorkspacePath', workspacePath);
-    store.set('onboarding.memoryMigrated', false);
-    const provider = normalizeClawBotProvider(data.aiProvider);
-    const model = data.gatewayModel?.trim() || getDefaultClawBotModel(provider);
-    store.set('clawbot.provider', provider);
-    store.set('clawbot.url', data.gatewayUrl);
-    store.set('clawbot.token', data.gatewayToken);
-    store.set('clawbot.model', model);
-    store.set('watch.folders', data.watchFolders);
-    store.set('watch.activeApp', data.watchActiveApp);
-    store.set('watch.sendWindowTitles', data.watchWindowTitles);
-    store.set('hotkeys.openChat', sanitizeAccelerator(data.hotkeyOpenChat, DEFAULT_HOTKEYS.openChat));
-    store.set('hotkeys.captureScreen', sanitizeAccelerator(data.hotkeyCaptureScreen, DEFAULT_HOTKEYS.captureScreen));
-    store.set('hotkeys.openAssistant', sanitizeAccelerator(data.hotkeyOpenAssistant, DEFAULT_HOTKEYS.openAssistant));
-    store.set('hotkeys.hideApp', sanitizeAccelerator(data.hotkeyHideApp, DEFAULT_HOTKEYS.hideApp));
-    setLaunchOnStartup(data.launchOnStartup);
-
-    // Update ClawBotClient with new config
-    clawbot?.updateConfig(data.gatewayUrl, data.gatewayToken, null, { provider, model });
-
-    closeOnboardingAndStartApp();
+    try {
+      store.set('onboarding.completed', true);
+      store.set('onboarding.skipped', false);
+      store.set('onboarding.workspaceType', 'ayati');
+      const workspacePath = (store.get('onboarding.ayatiWorkspacePath') as string | null)
+        ?? getDefaultAyahLensWorkspacePath();
+      fs.mkdirSync(workspacePath, { recursive: true });
+      store.set('onboarding.ayatiWorkspacePath', workspacePath);
+      store.set('onboarding.memoryMigrated', false);
+      store.set('watch.folders', data.watchFolders);
+      store.set('watch.activeApp', data.watchActiveApp);
+      store.set('watch.sendWindowTitles', data.watchWindowTitles);
+      store.set('hotkeys.openAssistant', sanitizeAccelerator(data.hotkeyOpenAssistant, DEFAULT_HOTKEYS.openAssistant));
+      store.set('hotkeys.hideApp', sanitizeAccelerator(data.hotkeyHideApp, DEFAULT_HOTKEYS.hideApp));
+      setLaunchOnStartup(data.launchOnStartup);
+    } catch (error) {
+      console.error('[Onboarding] Failed to persist completion (setup window will still close):', error);
+    } finally {
+      closeOnboardingAndStartApp();
+    }
     return true;
   });
 
@@ -5424,42 +5158,6 @@ function setupIPC() {
     };
   });
 
-  // Tutorial handlers
-  ipcMain.on('tutorial-pet-clicked', () => {
-    tutorialManager.handlePetClicked();
-  });
-
-  ipcMain.on('tutorial-next', () => {
-    tutorialManager.handleNextClicked();
-  });
-
-  ipcMain.on('tutorial-skip', () => {
-    tutorialManager.skip();
-  });
-
-  ipcMain.on('tutorial-resume', () => {
-    hidePetChat(); // Hide any existing chat popup during tutorial
-    tutorialManager.resume();
-  });
-
-  ipcMain.on('tutorial-start-over', () => {
-    hidePetChat(); // Hide any existing chat popup during tutorial
-    tutorialManager.startOver();
-  });
-
-  ipcMain.on('tutorial-open-panel', () => {
-    tutorialManager.handleOpenPanelClicked();
-  });
-
-  ipcMain.handle('replay-tutorial', () => {
-    hidePetChat(); // Hide any existing chat popup during tutorial
-    tutorialManager.replay();
-    return true;
-  });
-
-  ipcMain.handle('get-tutorial-status', () => {
-    return tutorialManager.getStatus();
-  });
 }
 
 function normalizeSettingsValue(key: string, value: unknown): unknown {
@@ -5513,25 +5211,9 @@ function registerHotkeys() {
   globalShortcut.unregisterAll();
 
   const hotkeyOpenAssistant = registerConfiguredHotkey('hotkeys.openAssistant', DEFAULT_HOTKEYS.openAssistant, () => {
-    // Notify tutorial if active
-    tutorialManager.handleHotkeyPressed('openAssistant');
     toggleAssistantWindow();
   });
   console.log(`[Hotkeys] Registered open assistant: ${hotkeyOpenAssistant}`);
-
-  const hotkeyOpenChat = registerConfiguredHotkey('hotkeys.openChat', DEFAULT_HOTKEYS.openChat, () => {
-    // Notify tutorial if active
-    tutorialManager.handleHotkeyPressed('openChat');
-    resetInteractionTimer();
-    toggleChatbarWindow();
-  });
-  console.log(`[Hotkeys] Registered open chat: ${hotkeyOpenChat}`);
-
-  const hotkeyCaptureScreen = registerConfiguredHotkey('hotkeys.captureScreen', DEFAULT_HOTKEYS.captureScreen, () => {
-    console.log('[ScreenshotQuestion] Hotkey triggered');
-    toggleScreenshotQuestionWindow();
-  });
-  console.log(`[Hotkeys] Registered capture screen: ${hotkeyCaptureScreen}`);
 
   const hotkeyHideApp = registerConfiguredHotkey('hotkeys.hideApp', DEFAULT_HOTKEYS.hideApp, () => {
     toggleHideAllCompanionWindows();
@@ -5873,13 +5555,6 @@ function setupTray() {
         }
       },
     },
-    { type: 'separator' },
-    {
-      label: 'Restart Tutorial',
-      click: () => {
-        tutorialManager.startOver();
-      },
-    },
     {
       label: 'Reset Onboarding',
       click: () => {
@@ -6024,6 +5699,5 @@ if (shouldStartApp) {
     if (moveAnimation) {
       clearInterval(moveAnimation);
     }
-    tutorialManager.destroy();
   });
 }

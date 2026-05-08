@@ -1,26 +1,18 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { WelcomeStep } from './steps/WelcomeStep';
-import { ApiKeysStep } from './steps/ApiKeysStep';
 import { WatchStep } from './steps/WatchStep';
 import { HotkeysStep } from './steps/HotkeysStep';
 import { CompleteStep } from './steps/CompleteStep';
 import { OnboardingIcon } from './OnboardingIcon';
-import { DEFAULT_AI_PROVIDER, DEFAULT_OPENROUTER_BASE_URL, DEFAULT_OPENROUTER_MODEL, type ClawBotProvider } from '../aiProviderDefaults';
 
 export type WorkspaceType = 'ayati';
 
 export interface OnboardingData {
   workspaceType: WorkspaceType;
   launchOnStartup: boolean;
-  aiProvider: ClawBotProvider;
-  gatewayUrl: string;
-  gatewayToken: string;
-  gatewayModel: string;
   watchFolders: string[];
   watchActiveApp: boolean;
   watchWindowTitles: boolean;
-  hotkeyOpenChat: string;
-  hotkeyCaptureScreen: string;
   hotkeyOpenAssistant: string;
   hotkeyHideApp: string;
 }
@@ -28,29 +20,16 @@ export interface OnboardingData {
 const INITIAL_DATA: OnboardingData = {
   workspaceType: 'ayati',
   launchOnStartup: true,
-  aiProvider: DEFAULT_AI_PROVIDER,
-  gatewayUrl: DEFAULT_OPENROUTER_BASE_URL,
-  gatewayToken: '',
-  gatewayModel: DEFAULT_OPENROUTER_MODEL,
   watchFolders: [],
   watchActiveApp: false,
   watchWindowTitles: false,
-  hotkeyOpenChat: 'CommandOrControl+Alt+,',
-  hotkeyCaptureScreen: 'CommandOrControl+Alt+/',
   hotkeyOpenAssistant: 'CommandOrControl+Alt+.',
-  hotkeyHideApp: 'CommandOrControl+Alt+Shift+,',
+  hotkeyHideApp: 'CommandOrControl+Alt+,',
 };
 
-type Step = 'welcome' | 'apiKeys' | 'watch' | 'hotkeys' | 'complete';
+type Step = 'welcome' | 'watch' | 'hotkeys' | 'complete';
 
-const STEP_ORDER: Step[] = ['welcome', 'apiKeys', 'watch', 'hotkeys', 'complete'];
-
-function hasEditedAiSetup(data: OnboardingData): boolean {
-  return data.aiProvider !== INITIAL_DATA.aiProvider
-    || data.gatewayUrl !== INITIAL_DATA.gatewayUrl
-    || data.gatewayToken !== INITIAL_DATA.gatewayToken
-    || data.gatewayModel !== INITIAL_DATA.gatewayModel;
-}
+const STEP_ORDER: Step[] = ['welcome', 'hotkeys', 'watch', 'complete'];
 
 export function Onboarding() {
   const [currentStep, setCurrentStep] = useState<Step>('welcome');
@@ -59,37 +38,6 @@ export function Onboarding() {
 
   const updateData = useCallback((updates: Partial<OnboardingData>) => {
     setData(prev => ({ ...prev, ...updates }));
-  }, []);
-
-  // Load defaults on mount
-  useEffect(() => {
-    const loadDefaults = async () => {
-      try {
-        const settings = await window.ayati.getSettings() as {
-          clawbot?: {
-            provider?: ClawBotProvider;
-            url?: string;
-            token?: string;
-            model?: string;
-          };
-        };
-        setData((currentData) => {
-          if (hasEditedAiSetup(currentData)) return currentData;
-
-          return {
-            ...currentData,
-            aiProvider: settings.clawbot?.provider || DEFAULT_AI_PROVIDER,
-            gatewayUrl: settings.clawbot?.url || DEFAULT_OPENROUTER_BASE_URL,
-            gatewayToken: '',
-            gatewayModel: settings.clawbot?.model || DEFAULT_OPENROUTER_MODEL,
-          };
-        });
-      } catch (error) {
-        console.error('Failed to load defaults:', error);
-      }
-    };
-
-    loadDefaults();
   }, []);
 
   const currentStepIndex = STEP_ORDER.indexOf(currentStep);
@@ -151,7 +99,7 @@ export function Onboarding() {
     if (currentStep === 'welcome') return 'Get Started';
     if (currentStep === 'complete') {
       if (isCompleting) return 'Waking up…';
-      return 'Open Ayati - Quran Desktop Companion';
+      return 'Open Ayati';
     }
     return 'Continue';
   };
@@ -176,8 +124,6 @@ export function Onboarding() {
     switch (currentStep) {
       case 'welcome':
         return <WelcomeStep {...props} />;
-      case 'apiKeys':
-        return <ApiKeysStep {...props} />;
       case 'watch':
         return <WatchStep {...props} />;
       case 'hotkeys':
@@ -255,28 +201,44 @@ export function Onboarding() {
       </div>
 
       {/* Action Footer — solid bg, no backdrop-blur to avoid compositing cost */}
-      <div className="no-drag h-[88px] absolute bottom-0 w-full flex items-center justify-between px-10 bg-[#FAF9F6] border-t border-[#1a2a24]/[0.05] z-50 select-none">
-        <button
-          onClick={handleSkip}
-          className="px-4 py-2.5 rounded-xl text-sm font-medium text-[#1a2a24]/40 hover:text-[#1a2a24] hover:bg-[#1a2a24]/05 transition-colors"
-        >
-          Skip setup
-        </button>
-
-        <button
-          onClick={handleNextClick}
-          disabled={isNextDisabled() || isCompleting}
-          className={`px-8 py-3.5 rounded-2xl text-sm font-semibold transition-[background-color,transform] duration-150 flex items-center gap-2.5 ${
-            isNextDisabled() || isCompleting
-              ? 'bg-[#1a2a24]/10 text-[#1a2a24]/30 cursor-not-allowed'
-              : 'bg-[#1a2a24] text-[#FAF9F6] hover:bg-[#2a3a34] active:scale-[0.98]'
-          }`}
-        >
-          {isCompleting && (
-            <OnboardingIcon name="spinner" size="1.125rem" className="animate-spin" />
-          )}
-          {getNextButtonText()}
-        </button>
+      <div className="no-drag h-[88px] absolute bottom-0 w-full flex items-center px-10 bg-[#FAF9F6] border-t border-[#1a2a24]/[0.05] z-50 select-none">
+        <div className="flex w-full items-center gap-4">
+          <div className="flex flex-1 justify-start min-h-[48px] items-center">
+            {currentStepIndex > 0 ? (
+              <button
+                type="button"
+                onClick={goToPreviousStep}
+                disabled={isCompleting}
+                className={`brand-ui px-5 py-3 rounded-2xl text-sm font-semibold border transition-[background-color,color,border-color,transform] duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#67E0A3]/80 ${
+                  isCompleting
+                    ? 'border-[#1a2a24]/[0.06] text-[#1a2a24]/25 cursor-not-allowed'
+                    : 'border-[#1a2a24]/12 text-[#1a2a24]/75 hover:bg-[#1a2a24]/[0.04] hover:border-[#1a2a24]/18 active:scale-[0.98]'
+                }`}
+              >
+                Back
+              </button>
+            ) : null}
+          </div>
+          <div className="flex flex-1 justify-end">
+            <button
+              onClick={handleNextClick}
+              disabled={isNextDisabled() || isCompleting}
+              type="button"
+              className={`px-8 py-3.5 rounded-2xl text-sm font-semibold transition-[background-color,transform,box-shadow] duration-150 flex items-center gap-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#67E0A3]/80 ${
+                isNextDisabled() || isCompleting
+                  ? 'bg-[#1a2a24]/10 text-[#1a2a24]/30 cursor-not-allowed'
+                  : currentStep === 'welcome'
+                  ? 'brand-display bg-[#67E0A3] text-[#1a2a24] hover:bg-[#7CF0BD] active:scale-[0.98]'
+                  : 'bg-[#1a2a24] text-[#FAF9F6] hover:bg-[#2a3a34] active:scale-[0.98]'
+              }`}
+            >
+              {isCompleting && (
+                <OnboardingIcon name="spinner" size="1.125rem" className="animate-spin" />
+              )}
+              {getNextButtonText()}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

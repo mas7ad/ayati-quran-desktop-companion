@@ -86,7 +86,7 @@ contextBridge.exposeInMainWorld('ayati', {
   completeQuranOAuthCallback: (callbackUrl: string) => ipcRenderer.invoke('quran-auth-complete', callbackUrl),
   getQuranAuthStatus: () => ipcRenderer.invoke('quran-auth-status'),
   disconnectQuranAccount: () => ipcRenderer.invoke('quran-auth-disconnect'),
-  captureAyahReflection: () => ipcRenderer.invoke('ayah-capture-reflection'),
+  captureAyahReflection: (theme?: AyahTheme) => ipcRenderer.invoke('ayah-capture-reflection', theme),
   getPendingAyahReflectionResult: () => ipcRenderer.invoke('ayah-pending-reflection-result'),
   saveAyahReflection: (reflectionId: string) => ipcRenderer.invoke('ayah-save-reflection', reflectionId),
   getAyahReflectionHistory: () => ipcRenderer.invoke('ayah-history'),
@@ -243,6 +243,9 @@ contextBridge.exposeInMainWorld('ayati', {
   onSwitchToFocus: (callback: () => void) => {
     ipcRenderer.on('switch-to-focus', () => callback());
   },
+  onSwitchToReflections: (callback: () => void) => {
+    ipcRenderer.on('switch-to-reflections', () => callback());
+  },
 
   // Pet interactions
   petClicked: () => ipcRenderer.send('pet-clicked'),
@@ -250,44 +253,17 @@ contextBridge.exposeInMainWorld('ayati', {
   hidePetContextMenu: () => ipcRenderer.send('hide-pet-context-menu'),
   petContextMenuAction: (action: 'chat' | 'settings' | 'workspace' | 'quit') => ipcRenderer.send('pet-context-menu-action', action),
 
-  // Tutorial
-  tutorialPetClicked: () => ipcRenderer.send('tutorial-pet-clicked'),
-  tutorialNext: () => ipcRenderer.send('tutorial-next'),
-  tutorialSkip: () => ipcRenderer.send('tutorial-skip'),
-  tutorialResume: () => ipcRenderer.send('tutorial-resume'),
-  tutorialStartOver: () => ipcRenderer.send('tutorial-start-over'),
-  tutorialOpenPanel: () => ipcRenderer.send('tutorial-open-panel'),
-  replayTutorial: () => ipcRenderer.invoke('replay-tutorial'),
-  getTutorialStatus: () => ipcRenderer.invoke('get-tutorial-status'),
-  onTutorialStep: (callback: (data: { step: number; copy: string; totalSteps: number }) => void) => {
-    ipcRenderer.on('tutorial-step', (_event, data) => callback(data));
-  },
-  onTutorialHint: (callback: (data: { step: number; hintType: string }) => void) => {
-    ipcRenderer.on('tutorial-hint', (_event, data) => callback(data));
-  },
-  onTutorialEnded: (callback: (data: { skipped: boolean }) => void) => {
-    ipcRenderer.on('tutorial-ended', (_event, data) => callback(data));
-  },
-  onTutorialResumePrompt: (callback: () => void) => {
-    ipcRenderer.on('tutorial-resume-prompt', () => callback());
-  },
-
   // Onboarding
   onboardingMinimize: () => ipcRenderer.send('onboarding-minimize'),
   onboardingMaximize: () => ipcRenderer.send('onboarding-maximize'),
   onboardingSkip: () => ipcRenderer.invoke('onboarding-skip'),
   onboardingComplete: (data: {
     launchOnStartup: boolean;
-    aiProvider?: ClawBotProvider;
-    gatewayUrl: string;
-    gatewayToken: string;
-    gatewayModel?: string;
     watchFolders: string[];
     watchActiveApp: boolean;
     watchWindowTitles: boolean;
-    hotkeyOpenChat: string;
-    hotkeyCaptureScreen: string;
     hotkeyOpenAssistant: string;
+    hotkeyHideApp: string;
   }) => ipcRenderer.invoke('onboarding-complete', data),
   validateGateway: (
     url: string,
@@ -319,12 +295,9 @@ contextBridge.exposeInMainWorld('ayati', {
     ipcRenderer.removeAllListeners('chat-sync');
     ipcRenderer.removeAllListeners('switch-to-chat');
     ipcRenderer.removeAllListeners('switch-to-settings');
+    ipcRenderer.removeAllListeners('switch-to-reflections');
     ipcRenderer.removeAllListeners('update-state');
     ipcRenderer.removeAllListeners('ayah-oauth-callback');
-    ipcRenderer.removeAllListeners('tutorial-step');
-    ipcRenderer.removeAllListeners('tutorial-hint');
-    ipcRenderer.removeAllListeners('tutorial-ended');
-    ipcRenderer.removeAllListeners('tutorial-resume-prompt');
     ipcRenderer.removeAllListeners('pomodoro-overlay-update');
   },
 });
@@ -582,15 +555,9 @@ export interface StartPomodoroInput {
 export interface OnboardingData {
   workspaceType: 'ayati';
   launchOnStartup: boolean;
-  aiProvider?: ClawBotProvider;
-  gatewayUrl: string;
-  gatewayToken: string;
-  gatewayModel?: string;
   watchFolders: string[];
   watchActiveApp: boolean;
   watchWindowTitles: boolean;
-  hotkeyOpenChat: string;
-  hotkeyCaptureScreen: string;
   hotkeyOpenAssistant: string;
   hotkeyHideApp: string;
 }
@@ -726,7 +693,7 @@ export interface AyatiAPI {
   completeQuranOAuthCallback: (callbackUrl: string) => Promise<QuranAuthStatus>;
   getQuranAuthStatus: () => Promise<QuranAuthStatus>;
   disconnectQuranAccount: () => Promise<boolean>;
-  captureAyahReflection: () => Promise<AyahReflection>;
+  captureAyahReflection: (theme?: AyahTheme) => Promise<AyahReflection>;
   getPendingAyahReflectionResult: () => Promise<PendingAyahReflectionResult | null>;
   saveAyahReflection: (reflectionId: string) => Promise<AyahReflection | null>;
   getAyahReflectionHistory: () => Promise<AyahReflection[]>;
@@ -815,23 +782,11 @@ export interface AyatiAPI {
   onSwitchToPrayers: (callback: () => void) => void;
   onSwitchToTodos: (callback: () => void) => void;
   onSwitchToFocus: (callback: () => void) => void;
+  onSwitchToReflections: (callback: () => void) => void;
   petClicked: () => void;
   showPetContextMenu: (x: number, y: number) => void;
   hidePetContextMenu: () => void;
   petContextMenuAction: (action: 'chat' | 'settings' | 'workspace' | 'quit') => void;
-  // Tutorial
-  tutorialPetClicked: () => void;
-  tutorialNext: () => void;
-  tutorialSkip: () => void;
-  tutorialResume: () => void;
-  tutorialStartOver: () => void;
-  tutorialOpenPanel: () => void;
-  replayTutorial: () => Promise<boolean>;
-  getTutorialStatus: () => Promise<{ isActive: boolean; currentStep: number | null; completed: boolean }>;
-  onTutorialStep: (callback: (data: { step: number; copy: string; totalSteps: number }) => void) => void;
-  onTutorialHint: (callback: (data: { step: number; hintType: string }) => void) => void;
-  onTutorialEnded: (callback: (data: { skipped: boolean }) => void) => void;
-  onTutorialResumePrompt: (callback: () => void) => void;
   // Onboarding
   onboardingMinimize: () => void;
   onboardingMaximize: () => void;

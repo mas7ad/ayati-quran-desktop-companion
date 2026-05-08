@@ -453,7 +453,7 @@ describe('Assistant productivity tabs', () => {
 });
 
 describe('Assistant settings shortcuts', () => {
-  it('shows persisted onboarding AI setup in the settings tab', async () => {
+  it('does not show AI provider setup in the settings tab', async () => {
     const ayati = createMockAyati();
     ayati.getSettings.mockResolvedValue({
       clawbot: {
@@ -474,13 +474,12 @@ describe('Assistant settings shortcuts', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
 
-    expect(await screen.findByLabelText(/provider/i)).toHaveValue('gemini');
-    expect(screen.getByLabelText(/base url/i)).toHaveValue('https://generativelanguage.googleapis.com/v1beta/openai');
-    expect(screen.getByLabelText(/model/i)).toHaveValue('gemini-3-flash-preview');
-    expect(screen.getByLabelText(/api key/i)).toHaveValue('onboarding-gemini-key');
+    expect(await screen.findByText('Quran Reminders')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/provider/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/api key/i)).not.toBeInTheDocument();
   });
 
-  it('shows shortcut controls in chat, assistant, reflect order with new defaults', async () => {
+  it('shows shortcut controls without chat or screen reflection shortcuts', async () => {
     const ayati = createMockAyati();
     Object.defineProperty(window, 'ayati', {
       configurable: true,
@@ -493,17 +492,12 @@ describe('Assistant settings shortcuts', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
 
-    const openChat = await screen.findByText('Open Chat');
-    const openAssistant = screen.getByText('Open Assistant');
-    const reflectOnScreen = screen.getByText('Reflect on Screen');
-
+    const openAssistant = await screen.findByText('Open Assistant');
     const hideApp = screen.getByText('Hide App');
-    expect(openChat.compareDocumentPosition(openAssistant) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(openAssistant.compareDocumentPosition(reflectOnScreen) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(reflectOnScreen.compareDocumentPosition(hideApp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole('button', { name: /change open chat shortcut, currently ⌘ \+ ⌥ \+ ,/i })).toBeInTheDocument();
+    expect(openAssistant.compareDocumentPosition(hideApp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText('Open Chat')).not.toBeInTheDocument();
+    expect(screen.queryByText('Reflect on Screen')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /change open assistant shortcut, currently ⌘ \+ ⌥ \+ \./i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /change reflect on screen shortcut, currently ⌘ \+ ⌥ \+ \//i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /change hide app shortcut, currently ⌘ \+ ⌥ \+ ⇧ \+ ,/i })).toBeInTheDocument();
   });
 });

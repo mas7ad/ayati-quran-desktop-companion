@@ -275,15 +275,9 @@ interface StartPomodoroInput {
 interface OnboardingData {
   workspaceType: 'ayati';
   launchOnStartup: boolean;
-  aiProvider?: ClawBotProvider;
-  gatewayUrl: string;
-  gatewayToken: string;
-  gatewayModel?: string;
   watchFolders: string[];
   watchActiveApp: boolean;
   watchWindowTitles: boolean;
-  hotkeyOpenChat: string;
-  hotkeyCaptureScreen: string;
   hotkeyOpenAssistant: string;
   hotkeyHideApp: string;
 }
@@ -425,7 +419,7 @@ interface AyatiAPI {
   completeQuranOAuthCallback: (callbackUrl: string) => Promise<QuranAuthStatus>;
   getQuranAuthStatus: () => Promise<QuranAuthStatus>;
   disconnectQuranAccount: () => Promise<boolean>;
-  captureAyahReflection: () => Promise<AyahReflection>;
+  captureAyahReflection: (theme?: AyahTheme) => Promise<AyahReflection>;
   getPendingAyahReflectionResult: () => Promise<PendingAyahReflectionResult | null>;
   saveAyahReflection: (reflectionId: string) => Promise<AyahReflection | null>;
   getAyahReflectionHistory: () => Promise<AyahReflection[]>;
@@ -522,24 +516,12 @@ interface AyatiAPI {
   onSwitchToPrayers: (callback: () => void) => void;
   onSwitchToTodos: (callback: () => void) => void;
   onSwitchToFocus: (callback: () => void) => void;
+  onSwitchToReflections: (callback: () => void) => void;
   petClicked: () => void;
   showPetContextMenu: (x: number, y: number) => void;
   hidePetContextMenu: () => void;
   petContextMenuAction: (action: 'chat' | 'settings' | 'workspace') => void;
   removeAllListeners: () => void;
-  // Tutorial
-  tutorialPetClicked: () => void;
-  tutorialNext: () => void;
-  tutorialSkip: () => void;
-  tutorialResume: () => void;
-  tutorialStartOver: () => void;
-  tutorialOpenPanel: () => void;
-  replayTutorial: () => Promise<boolean>;
-  getTutorialStatus: () => Promise<{ isActive: boolean; currentStep: number | null; completed: boolean }>;
-  onTutorialStep: (callback: (data: { step: number; copy: string; totalSteps: number }) => void) => void;
-  onTutorialHint: (callback: (data: { step: number; hintType: string }) => void) => void;
-  onTutorialEnded: (callback: (data: { skipped: boolean }) => void) => void;
-  onTutorialResumePrompt: (callback: () => void) => void;
   // Onboarding
   onboardingSkip: () => Promise<boolean>;
   onboardingComplete: (data: OnboardingData) => Promise<boolean>;

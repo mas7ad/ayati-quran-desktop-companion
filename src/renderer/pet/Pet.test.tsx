@@ -58,7 +58,6 @@ function installMockAyati(): {
     showPetChat: vi.fn(),
     showPetContextMenu: vi.fn(),
     petClicked: vi.fn(),
-    tutorialPetClicked: vi.fn(),
     removeAllListeners: vi.fn(),
     onClawbotMood: vi.fn((callback: (data: { state: string; reason?: string }) => void) => {
       moodHandler = callback;
@@ -81,10 +80,6 @@ function installMockAyati(): {
     onIdleBehavior: vi.fn((callback: (data: { type: string; direction?: string }) => void) => {
       idleBehaviorHandler = callback;
     }),
-    onTutorialStep: vi.fn(),
-    onTutorialEnded: vi.fn(),
-    onTutorialResumePrompt: vi.fn(),
-    onTutorialHint: vi.fn(),
   } satisfies Partial<Window['ayati']>;
 
   Object.defineProperty(window, 'ayati', {

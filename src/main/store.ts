@@ -28,13 +28,6 @@ interface OnboardingState {
   memoryMigrated: boolean;
 }
 
-interface TutorialState {
-  version: number;
-  completedAt: string | null;  // ISO timestamp
-  wasInterrupted: boolean;     // For resume prompt
-  lastStep: number;
-}
-
 interface StoreSchema {
   clawbot: {
     url: string;
@@ -65,7 +58,6 @@ interface StoreSchema {
   };
   chatHistory: ChatMessage[];
   onboarding: OnboardingState;
-  tutorial: TutorialState;
   dev: {
     windowBorders: boolean;
     showPetModeOverlay: boolean;
@@ -114,12 +106,6 @@ export function createDefaultStoreSchema(): StoreSchema {
       workspaceType: null,
       ayatiWorkspacePath: null,
       memoryMigrated: false,
-    },
-    tutorial: {
-      version: 1,
-      completedAt: null,
-      wasInterrupted: false,
-      lastStep: 0,
     },
     dev: {
       windowBorders: false,
@@ -170,4 +156,4 @@ export function createStore(): Store<StoreSchema> {
   return store;
 }
 
-export type { StoreSchema, OnboardingState, TutorialState };
+export type { StoreSchema, OnboardingState };

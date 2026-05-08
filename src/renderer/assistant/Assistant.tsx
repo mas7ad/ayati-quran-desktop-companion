@@ -1,16 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Icon } from '@iconify/react';
-import { LinkifyText } from '../components/LinkifyText';
-import { MarkdownMessage } from '../components/MarkdownMessage';
 import { QulArabicText } from '../components/QulArabicText';
 import { HotkeyInput } from '../components/HotkeyInput';
-import { AiProviderSettingsFields } from '../components/AiProviderSettingsFields';
 import { SettingsSection } from '../components/SettingsSection';
-import {
-  DEFAULT_AI_PROVIDER,
-  getAiProviderConfig,
-  type ClawBotProvider,
-} from '../aiProviderDefaults';
 import {
   PET_APPEARANCE_IDS,
   PET_APPEARANCE_LABELS,
@@ -23,26 +15,31 @@ import { filterAvailableRecitationResources } from '../../shared/quran-reciter-p
 import { getAtlasForAppearance, type PetClipId } from '../pet/pet-sprite-atlas';
 import { getTafsirParagraphs } from '../screenshot-question/AyahVerseCard';
 
-interface Message {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  timestamp: number;
-}
-
 type Tab = 'prayers' | 'todos' | 'focus' | 'reflections' | 'settings';
 type UpdateAction = 'check' | 'download' | 'install';
 
 const isDevEnvironment = import.meta.env.DEV;
-const SCROLL_TO_BOTTOM_THRESHOLD = 140;
-const QURAN_GUIDANCE_PROMPT = 'What Quranic guidance should I keep in mind for what I do next?';
-const DAY_REFLECTION_PROMPT = 'Summarize my day through Quranic reminders and practical next steps.';
 const QUL_SCRIPT_OPTIONS = [
   { value: 'madani1421', label: 'Madani 1421 (page glyph)' },
   { value: 'madaniV4Tajweed', label: 'Madani V4 Tajweed (glyph)' },
   { value: 'indoPakNastaleeq', label: 'Indo-Pak Nastaleeq' },
   { value: 'qpcNastaleeq', label: 'QPC Nastaleeq' },
 ] as const;
+const MANUAL_REFLECTION_OPTIONS: Array<{ value: AyahTheme; label: string }> = [
+  { value: 'unclear', label: 'General Remembrance' },
+  { value: 'stress', label: 'Stress' },
+  { value: 'focus', label: 'Focus' },
+  { value: 'gratitude', label: 'Gratitude' },
+  { value: 'patience', label: 'Patience' },
+  { value: 'study', label: 'Study' },
+  { value: 'planning', label: 'Planning' },
+  { value: 'work', label: 'Work' },
+  { value: 'distraction', label: 'Distraction' },
+  { value: 'conflict', label: 'Conflict' },
+  { value: 'beauty', label: 'Beauty' },
+  { value: 'excess', label: 'Moderation' },
+  { value: 'risk', label: 'Uncertainty' },
+];
 
 function isQulFontPackMissing(
   packs: Record<string, boolean> | null | undefined,
@@ -233,11 +230,7 @@ type QuranContentListResource = { id: number; name: string; languageName?: strin
 
 export const Assistant: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('prayers');
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [activeStreamMessageId, setActiveStreamMessageId] = useState<string | null>(null);
-  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [ayahSettings, setAyahSettings] = useState<AyahLensSettings | null>(null);
   const [quranAuthStatus, setQuranAuthStatus] = useState<QuranAuthStatus>({ isConnected: false, scopes: [] });
@@ -248,6 +241,7 @@ export const Assistant: React.FC = () => {
   const [reflectionSearch, setReflectionSearch] = useState('');
   const [reflectionStatusFilter, setReflectionStatusFilter] = useState<'all' | 'saved' | 'pending'>('all');
   const [reflectionThemeFilter, setReflectionThemeFilter] = useState<'all' | AyahTheme>('all');
+  const [selectedReflectionTheme, setSelectedReflectionTheme] = useState<AyahTheme>('unclear');
   const [reflectionFeedbackFilter, setReflectionFeedbackFilter] = useState<'all' | 'relevant' | 'not_relevant'>('all');
   const [reflectionActionsMenuId, setReflectionActionsMenuId] = useState<string | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
@@ -282,60 +276,10 @@ export const Assistant: React.FC = () => {
   const [translationResources, setTranslationResources] = useState<QuranContentListResource[]>([]);
   const [translationLanguageFilter, setTranslationLanguageFilter] = useState<string>('all');
   const todoAddDropdownRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const activeStreamRequestIdRef = useRef<string | null>(null);
-  const activeStreamMessageIdRef = useRef<string | null>(null);
-  const chatScrollTopRef = useRef(0);
-  const chatShouldAutoScrollRef = useRef(true);
-  const hasInitializedChatScrollRef = useRef(false);
-
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
-    if (typeof messagesEndRef.current?.scrollIntoView !== 'function') return;
-    messagesEndRef.current.scrollIntoView({ behavior });
-  }, []);
-
-  const updateScrollState = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    const isAboveThreshold = distanceFromBottom > SCROLL_TO_BOTTOM_THRESHOLD;
-
-    chatScrollTopRef.current = container.scrollTop;
-    chatShouldAutoScrollRef.current = !isAboveThreshold;
-    setShowScrollToBottom(isAboveThreshold);
-  }, []);
-
-  const persistChatScrollPosition = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    chatScrollTopRef.current = container.scrollTop;
-    chatShouldAutoScrollRef.current = distanceFromBottom <= SCROLL_TO_BOTTOM_THRESHOLD;
-  }, []);
 
   const switchTab = useCallback((nextTab: Tab) => {
-    setActiveTab((currentTab) => {
-      if (currentTab === nextTab) return currentTab;
-      if (currentTab === 'chat') {
-        persistChatScrollPosition();
-      }
-      return nextTab;
-    });
-  }, [persistChatScrollPosition]);
-
-  const handleMessagesScroll = useCallback(() => {
-    updateScrollState();
-  }, [updateScrollState]);
-
-  const handleScrollToBottomClick = useCallback(() => {
-    scrollToBottom('smooth');
-    setShowScrollToBottom(false);
-    setTimeout(() => {
-      updateScrollState();
-    }, 0);
-  }, [scrollToBottom, updateScrollState]);
+    setActiveTab(nextTab);
+  }, []);
 
   const ayahQulSettingsKey = useMemo(() => {
     if (!ayahSettings) return '';
@@ -401,136 +345,11 @@ export const Assistant: React.FC = () => {
     window.ayati.getPomodoroState?.().then(setPomodoroState);
     window.ayati.getUpdateState().then(setUpdateState);
 
-    window.ayati.getChatHistory().then((history) => {
-      if (Array.isArray(history) && history.length > 0) {
-        setMessages(history as Message[]);
-        // Scroll to bottom immediately after loading history
-        setTimeout(() => {
-          scrollToBottom('auto');
-          updateScrollState();
-        }, 0);
-      }
-    });
-
     window.ayati.onUpdateState(setUpdateState);
     window.ayati.onAyahOAuthCallback((callbackUrl) => {
       window.ayati.completeQuranOAuthCallback(callbackUrl).then((status) => {
         setQuranAuthStatus(status);
         setQuranStatusMessage(status.error ?? 'Quran Foundation account connected.');
-      });
-    });
-
-    window.ayati.onClawbotSuggestion((data: unknown) => {
-      const suggestion = data as { text: string };
-      const assistantMsg: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: suggestion.text,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
-    });
-
-    window.ayati.onCronResult((data) => {
-      const cronMsg: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: `[${data.jobName}] ${data.summary}`,
-        timestamp: data.timestamp,
-      };
-      setMessages((prev) => [...prev, cronMsg]);
-    });
-
-    window.ayati.onCronError((data) => {
-      const errorMsg: Message = {
-        id: crypto.randomUUID(),
-        role: 'system',
-        content: `[Cron Error: ${data.jobName}] ${data.error}`,
-        timestamp: data.timestamp,
-      };
-      setMessages((prev) => [...prev, errorMsg]);
-    });
-
-    window.ayati.onClawbotStreamChunk((data) => {
-      if (data.requestId !== activeStreamRequestIdRef.current) return;
-      const messageId = activeStreamMessageIdRef.current;
-      if (!messageId) return;
-
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === messageId
-            ? { ...msg, content: data.text }
-            : msg
-        )
-      );
-    });
-
-    window.ayati.onClawbotStreamEnd((data) => {
-      if (data.requestId !== activeStreamRequestIdRef.current) return;
-      const response = data.response as {
-        text?: string;
-        action?: { type: string; payload: unknown };
-      };
-
-      const messageId = activeStreamMessageIdRef.current;
-      if (messageId) {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === messageId
-              ? { ...msg, content: response.text || msg.content || 'No response' }
-              : msg
-          )
-        );
-      }
-
-      if (response.action?.type === 'open_url' && response.action.payload) {
-        window.ayati.openExternal(response.action.payload as string);
-      }
-
-      activeStreamRequestIdRef.current = null;
-      activeStreamMessageIdRef.current = null;
-      setActiveStreamMessageId(null);
-      setIsLoading(false);
-    });
-
-    window.ayati.onClawbotStreamError((data) => {
-      if (data.requestId !== activeStreamRequestIdRef.current) return;
-      const messageId = activeStreamMessageIdRef.current;
-      if (messageId) {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === messageId
-              ? { ...msg, content: `Failed to stream response: ${data.error}` }
-              : msg
-          )
-        );
-      }
-
-      activeStreamRequestIdRef.current = null;
-      activeStreamMessageIdRef.current = null;
-      setActiveStreamMessageId(null);
-      setIsLoading(false);
-    });
-
-    window.ayati.onChatSync(() => {
-      const shouldAutoScroll = chatShouldAutoScrollRef.current;
-      const savedScrollTop = chatScrollTopRef.current;
-      window.ayati.getChatHistory().then((history) => {
-        if (Array.isArray(history)) {
-          setMessages(history as Message[]);
-          setTimeout(() => {
-            const container = messagesContainerRef.current;
-            if (!container) return;
-
-            if (shouldAutoScroll) {
-              scrollToBottom('auto');
-            } else {
-              const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
-              container.scrollTop = Math.min(savedScrollTop, maxScrollTop);
-            }
-            updateScrollState();
-          }, 0);
-        }
       });
     });
 
@@ -554,132 +373,14 @@ export const Assistant: React.FC = () => {
       switchTab('focus');
     });
 
+    window.ayati.onSwitchToReflections?.(() => {
+      switchTab('reflections');
+    });
+
     return () => {
       window.ayati.removeAllListeners();
     };
-  }, [scrollToBottom, switchTab, updateScrollState]);
-
-  useEffect(() => {
-    if (messages.length > 0) {
-      window.ayati.saveChatHistory(messages);
-    }
-  }, [messages]);
-
-  const sendMessage = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
-    const prompt = input.trim();
-
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: prompt,
-      timestamp: Date.now(),
-    };
-
-    const streamingAssistantMessageId = crypto.randomUUID();
-    const assistantPlaceholder: Message = {
-      id: streamingAssistantMessageId,
-      role: 'assistant',
-      content: '...',
-      timestamp: Date.now(),
-    };
-
-    setMessages((prev) => [...prev, userMessage, assistantPlaceholder]);
-    setInput('');
-    setIsLoading(true);
-    setActiveStreamMessageId(streamingAssistantMessageId);
-    activeStreamMessageIdRef.current = streamingAssistantMessageId;
-
-    try {
-      const started = await window.ayati.startClawbotStream(prompt);
-      if (!started.requestId || started.error) {
-        throw new Error(started.error || 'Failed to start stream');
-      }
-
-      activeStreamRequestIdRef.current = started.requestId;
-      return;
-    } catch {
-      try {
-        const response = (await window.ayati.sendToClawbot(prompt)) as {
-          text?: string;
-          action?: { type: string; payload: unknown };
-        };
-
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === streamingAssistantMessageId
-              ? { ...msg, content: response.text || 'No response' }
-              : msg
-          )
-        );
-
-        if (response.action?.type === 'open_url' && response.action.payload) {
-          window.ayati.openExternal(response.action.payload as string);
-        }
-      } catch {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === streamingAssistantMessageId
-              ? { ...msg, content: 'Failed to get response from ClawBot' }
-              : msg
-          )
-        );
-      } finally {
-        activeStreamRequestIdRef.current = null;
-        activeStreamMessageIdRef.current = null;
-        setActiveStreamMessageId(null);
-        setIsLoading(false);
-      }
-    }
-  }, [input, isLoading]);
-
-  const handleKeyPress = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    },
-    [sendMessage]
-  );
-
-  const captureScreen = useCallback(async () => {
-    // Check permission first - if denied, show message
-    const permissionStatus = await window.ayati.getScreenCapturePermission();
-    if (permissionStatus === 'denied' || permissionStatus === 'restricted') {
-      alert('Screen recording permission required. Please enable in System Settings > Privacy & Security > Screen Recording');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const screenshot = await window.ayati.captureScreen();
-      if (screenshot) {
-        const userMessage: Message = {
-          id: crypto.randomUUID(),
-          role: 'user',
-          content: '[Screen captured - analyzing...]',
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, userMessage]);
-
-        const response = (await window.ayati.askAboutScreen(
-          'What is on my screen right now? Give me a short, practical summary and one helpful next step.',
-          screenshot
-        )) as { text?: string; response?: string; error?: string };
-
-        const assistantMessage: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: response.response || response.text || response.error || 'Could not analyze screen',
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+  }, [switchTab]);
 
   const updateSetting = useCallback(async (key: string, value: unknown) => {
     const newSettings = await window.ayati.updateSettings(key, value);
@@ -775,23 +476,17 @@ export const Assistant: React.FC = () => {
     setStreakSummary(nextStreak);
   }, []);
 
-  const reflectOnScreen = useCallback(async () => {
-    const permissionStatus = await window.ayati.getScreenCapturePermission();
-    if (permissionStatus === 'denied' || permissionStatus === 'restricted') {
-      alert('Screen recording permission required. Please enable in System Settings > Privacy & Security > Screen Recording');
-      return;
-    }
-
+  const createManualReflection = useCallback(async () => {
     setIsLoading(true);
     try {
-      const nextReflection = await window.ayati.captureAyahReflection();
+      const nextReflection = await window.ayati.captureAyahReflection(selectedReflectionTheme);
       await refreshReflections();
       switchTab('reflections');
       setQuranStatusMessage(`New reflection: ${nextReflection.surahName} ${nextReflection.verseKey}`);
     } finally {
       setIsLoading(false);
     }
-  }, [refreshReflections, switchTab]);
+  }, [refreshReflections, selectedReflectionTheme, switchTab]);
 
   const saveReflectionFromPanel = useCallback(async (reflectionId: string) => {
     const savedReflection = await window.ayati.saveAyahReflection(reflectionId);
@@ -1045,21 +740,6 @@ export const Assistant: React.FC = () => {
   const closeWindow = useCallback(() => {
     window.ayati.closeAssistant();
   }, []);
-
-  const clawbotSettings = settings.clawbot as {
-    url?: string;
-    token?: string;
-    provider?: ClawBotProvider;
-    model?: string;
-  } | undefined;
-  const aiProvider = clawbotSettings?.provider ?? DEFAULT_AI_PROVIDER;
-  const handleAiProviderChange = (nextProvider: ClawBotProvider) => {
-    const nextConfig = getAiProviderConfig(nextProvider);
-    updateSetting('clawbot.provider', nextProvider);
-    updateSetting('clawbot.url', nextConfig.baseUrl);
-    updateSetting('clawbot.model', nextConfig.defaultModel);
-    updateSetting('clawbot.token', '');
-  };
 
   const availableThemes = Array.from(
     new Set(reflections.flatMap((reflection) => reflection.themes.map((theme) => theme.id))),
@@ -1505,7 +1185,7 @@ export const Assistant: React.FC = () => {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
             <div>
               <h2 className="text-sm font-semibold text-white">Recent Reflections</h2>
-              <p className="text-xs text-neutral-500 mt-1">Screenshots stay transient; only text summaries are saved.</p>
+              <p className="text-xs text-neutral-500 mt-1">Choose what you need right now and save the ayahs that resonate.</p>
             </div>
             <div className="flex flex-wrap gap-2 shrink-0">
               <button
@@ -1515,13 +1195,23 @@ export const Assistant: React.FC = () => {
               >
                 Create Collection
               </button>
+              <select
+                aria-label="Reflection theme"
+                value={selectedReflectionTheme}
+                onChange={(event) => setSelectedReflectionTheme(event.target.value as AyahTheme)}
+                className="bg-[#0a0a0a] border border-white/10 rounded-md px-3 py-2 text-xs text-neutral-300"
+              >
+                {MANUAL_REFLECTION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
               <button
                 type="button"
-                onClick={reflectOnScreen}
+                onClick={createManualReflection}
                 disabled={isLoading}
                 className="px-3 py-2 bg-[#67E0A3] text-[#07120f] rounded-md text-xs font-semibold disabled:opacity-60"
               >
-                Reflect on Screen
+                New Reflection
               </button>
             </div>
           </div>
@@ -1821,20 +1511,6 @@ export const Assistant: React.FC = () => {
       {/* CONTENT: Settings */}
       {activeTab === 'settings' && (
         <div className="flex-1 flex flex-col overflow-y-auto p-5 space-y-4 scrollbar-hide">
-          <SettingsSection title="AI Provider">
-            <AiProviderSettingsFields
-              idPrefix="assistant-ai-provider"
-              provider={aiProvider}
-              baseUrl={clawbotSettings?.url || ''}
-              model={clawbotSettings?.model || ''}
-              apiKey={clawbotSettings?.token || ''}
-              onProviderChange={handleAiProviderChange}
-              onBaseUrlChange={(value) => updateSetting('clawbot.url', value)}
-              onModelChange={(value) => updateSetting('clawbot.model', value)}
-              onApiKeyChange={(value) => updateSetting('clawbot.token', value)}
-            />
-          </SettingsSection>
-
           <SettingsSection title="Quran Reminders">
             <div className="space-y-4">
               <label className="flex items-center justify-between cursor-pointer group">
@@ -2194,27 +1870,15 @@ export const Assistant: React.FC = () => {
           <SettingsSection title="Keyboard Shortcuts">
             <div className="divide-y divide-white/5">
               <HotkeyInput
-                label="Open Chat"
-                description="Summon the quick chat bar"
-                value={(settings.hotkeys as { openChat?: string })?.openChat || 'CommandOrControl+Alt+,'}
-                onChange={(value) => updateSetting('hotkeys.openChat', value)}
-              />
-              <HotkeyInput
                 label="Open Assistant"
                 description="Open the full assistant panel"
                 value={(settings.hotkeys as { openAssistant?: string })?.openAssistant || 'CommandOrControl+Alt+.'}
                 onChange={(value) => updateSetting('hotkeys.openAssistant', value)}
               />
               <HotkeyInput
-                label="Reflect on Screen"
-                description="Capture your screen and receive a fitting ayah"
-                value={(settings.hotkeys as { captureScreen?: string })?.captureScreen || 'CommandOrControl+Alt+/ '}
-                onChange={(value) => updateSetting('hotkeys.captureScreen', value)}
-              />
-              <HotkeyInput
                 label="Hide App"
                 description="Hide or show all Ayati windows (same shortcut toggles)"
-                value={(settings.hotkeys as { hideApp?: string })?.hideApp || 'CommandOrControl+Alt+Shift+,'}
+                value={(settings.hotkeys as { hideApp?: string })?.hideApp || 'CommandOrControl+Alt+,'}
                 onChange={(value) => updateSetting('hotkeys.hideApp', value)}
               />
             </div>
@@ -2393,7 +2057,7 @@ export const Assistant: React.FC = () => {
               </div>
 
               <p className="text-[11px] leading-relaxed text-neutral-500">
-                Ayati - Quran Desktop Companion deletes screenshot data after analysis. Translation text from Quran Foundation is displayed as returned and is not re-translated.
+                Translation text from Quran Foundation is displayed as returned and is not re-translated.
               </p>
               {quranStatusMessage && <p className="text-[11px] text-[#67E0A3]">{quranStatusMessage}</p>}
             </div>
@@ -2540,19 +2204,6 @@ export const Assistant: React.FC = () => {
                   <span className="text-[10px] text-neutral-500">Dev action</span>
                 </button>
               )}
-              <button
-                onClick={() => {
-                  window.ayati.replayTutorial();
-                  window.ayati.closeAssistant();
-                }}
-                className="w-full flex items-center justify-between px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors group"
-              >
-                <div className="flex items-center gap-2">
-                  <Icon icon="solar:play-circle-linear" className="text-neutral-400 group-hover:text-neutral-300" />
-                  <span className="text-sm font-medium text-neutral-300">Replay Tutorial</span>
-                </div>
-                <span className="text-[10px] text-neutral-500">Interactive guide</span>
-              </button>
               <button
                 onClick={() => {
                   if (confirm('This will reset onboarding and restart the app. Continue?')) {

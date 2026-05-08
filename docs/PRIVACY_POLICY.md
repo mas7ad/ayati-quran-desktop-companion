@@ -63,7 +63,7 @@ The App persists configuration and content **on the user’s computer** (typical
 
 - **Pet position, mood, appearance, transparency and attention-seeking preferences.**
 - **Global hotkey bindings.**
-- **Onboarding and tutorial progress** (completion flags, paths, step indices).
+- **Onboarding progress** (completion flags and paths).
 - **Developer-only flags** if enabled in dev builds (not typical for end users).
 
 ### 1.6 Prayer awareness

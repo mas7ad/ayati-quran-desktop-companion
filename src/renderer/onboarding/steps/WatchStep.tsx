@@ -41,12 +41,13 @@ export const WatchStep: React.FC<Props> = ({ data, updateData }) => {
   };
 
   return (
-    <div className="min-h-full px-12 pt-12 pb-12">
-      <div className="space-y-3 mb-10">
-        <p className="brand-display text-[10px] font-bold tracking-[0.2em] text-[#67E0A3] uppercase">Step 02</p>
-        <h2 className="text-[32px] font-semibold tracking-tight text-[#1a2a24]">Context Awareness</h2>
-        <p className="text-[15px] text-[#1a2a24]/60 max-w-[440px] leading-relaxed font-medium">
-          Ayati can detect your current application to provide even more relevant verses during your work.
+    <div className="onboarding-step-column">
+      <div className="space-y-3 mb-10 text-left">
+        <p className="onboarding-kicker">Step 03 — Context</p>
+        <h2 className="onboarding-step-title">Optional context awareness</h2>
+        <p className="onboarding-step-lede">
+          This step is optional. When enabled, Ayati can read which app is in front (and optionally window titles)
+          so reflections can feel more grounded in what you are doing. Nothing leaves your device.
         </p>
       </div>
 
@@ -56,9 +57,11 @@ export const WatchStep: React.FC<Props> = ({ data, updateData }) => {
           <div className="w-10 h-10 rounded-2xl bg-[#67E0A3]/10 flex items-center justify-center text-[#67E0A3] shrink-0">
             <OnboardingIcon name="warning" size="1.25rem" />
           </div>
-          <div className="text-[13px] text-[#1a2a24]/60 leading-relaxed font-medium py-1">
-            These features require <span className="text-[#1a2a24] font-bold underline decoration-[#67E0A3]/30">Accessibility permission</span>.
-            System Settings will open when you enable a feature.
+          <div className="brand-ui text-[13px] text-[#1a2a24]/60 leading-relaxed font-medium py-1">
+            These options need{' '}
+            <span className="text-[#1a2a24] font-bold underline decoration-[#67E0A3]/30">Accessibility permission</span>
+            {' '}
+            on macOS. Turning one on opens System Settings so you can approve Ayati.
           </div>
         </div>
       </div>
@@ -69,8 +72,9 @@ export const WatchStep: React.FC<Props> = ({ data, updateData }) => {
             <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
               <OnboardingIcon name="check" size="1.25rem" />
             </div>
-            <div className="text-[13px] leading-relaxed font-semibold py-1">
-              Permission requested. Ensure Ayati is toggled <span className="underline decoration-white/30">ON</span> in the Accessibility settings.
+            <div className="brand-ui text-[13px] leading-relaxed font-semibold py-1">
+              We asked for access. In System Settings → Privacy & Security → Accessibility, turn Ayati{' '}
+              <span className="underline decoration-white/30">on</span> if you want these features.
             </div>
           </div>
         </div>
@@ -83,8 +87,10 @@ export const WatchStep: React.FC<Props> = ({ data, updateData }) => {
               <OnboardingIcon name="window" size="1.5rem" />
             </div>
             <div>
-              <div className="text-[15px] font-bold text-[#1a2a24]">Active application</div>
-              <div className="text-[12px] text-[#1a2a24]/40 mt-0.5 font-semibold">Identify your current app context</div>
+              <div className="brand-display text-[15px] font-bold text-[#1a2a24]">Active application</div>
+              <div className="brand-ui text-[12px] text-[#1a2a24]/45 mt-0.5 font-semibold leading-snug">
+                Know which app is focused (no window titles).
+              </div>
             </div>
           </div>
           <label className="flex items-center cursor-pointer">
@@ -108,8 +114,10 @@ export const WatchStep: React.FC<Props> = ({ data, updateData }) => {
               <OnboardingIcon name="chat" size="1.5rem" />
             </div>
             <div>
-              <div className="text-[15px] font-bold text-[#1a2a24]">Window titles</div>
-              <div className="text-[12px] text-[#1a2a24]/40 mt-0.5 font-semibold">Use titles for deeper spiritual relevance</div>
+              <div className="brand-display text-[15px] font-bold text-[#1a2a24]">Window titles</div>
+              <div className="brand-ui text-[12px] text-[#1a2a24]/45 mt-0.5 font-semibold leading-snug">
+                Requires active application. Adds the front window title for finer context.
+              </div>
             </div>
           </div>
           <label className="flex items-center cursor-pointer">

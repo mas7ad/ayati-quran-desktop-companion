@@ -8,7 +8,6 @@ import {
   type PetVisualState,
 } from './pet-sprite-logic';
 import { getClipPlayDurationMs, POKE_REACTION_CLIPS } from './pet-sprite-atlas';
-import { TutorialOverlay } from './TutorialOverlay';
 
 type IdleBehavior = 'blink' | 'look_around' | 'snip_claws' | 'yawn' | 'stretch' | 'wiggle' | 'wander' | null;
 
@@ -55,7 +54,6 @@ export const Pet: React.FC = () => {
   const [walkDirection, setWalkDirection] = useState<'left' | 'right' | null>(null);
   const [dragRun, setDragRun] = useState<{ dir: 'left' | 'right' } | null>(null);
   const [idleBehavior, setIdleBehavior] = useState<IdleBehavior>(null);
-  const [tutorialActive, setTutorialActive] = useState(false);
   const [transparentWhenSleeping, setTransparentWhenSleeping] = useState(false);
   const [showModeOverlay, setShowModeOverlay] = useState(false);
   const [cameraSnapActive, setCameraSnapActive] = useState(false);
@@ -293,19 +291,6 @@ export const Pet: React.FC = () => {
       playIdleBehavior(idleData.type);
     });
 
-    // Listen for tutorial events
-    window.ayati.onTutorialStep(() => {
-      setTutorialActive(true);
-    });
-
-    window.ayati.onTutorialEnded(() => {
-      setTutorialActive(false);
-    });
-
-    window.ayati.onTutorialResumePrompt(() => {
-      setTutorialActive(true);
-    });
-
     return () => {
       if (idleBehaviorTimeoutRef.current) {
         clearTimeout(idleBehaviorTimeoutRef.current);
@@ -389,11 +374,6 @@ export const Pet: React.FC = () => {
   const handleClick = useCallback(() => {
     if (didDragRef.current) return;
 
-    // Notify tutorial if active
-    if (tutorialActive) {
-      window.ayati.tutorialPetClicked();
-    }
-
     if (sleepLockedRef.current) {
       setPetVisualState('idle');
       playWakeWindowFlight();
@@ -412,7 +392,7 @@ export const Pet: React.FC = () => {
 
     // Notify main process (optional - for sound effects or other reactions)
     window.ayati.petClicked?.();
-  }, [playWakeWindowFlight, setPetVisualState, tutorialActive]);
+  }, [playWakeWindowFlight, setPetVisualState]);
 
   // Right click = open custom context menu
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -425,7 +405,7 @@ export const Pet: React.FC = () => {
 
   return (
     <div
-      className={`pet-container ${tutorialActive ? 'tutorial-active' : ''} ${cameraFlashActive ? 'camera-flash-active' : ''}`}
+      className={`pet-container ${cameraFlashActive ? 'camera-flash-active' : ''}`}
       onMouseDown={handleMouseDown}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
@@ -448,9 +428,6 @@ export const Pet: React.FC = () => {
         </div>
       </div>
       <div className="camera-flash-overlay" aria-hidden="true" />
-
-      {/* Tutorial Overlay */}
-      <TutorialOverlay />
     </div>
   );
 };
