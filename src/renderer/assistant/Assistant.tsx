@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Icon } from '@iconify/react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { QulArabicText } from '../components/QulArabicText';
 import { HotkeyInput } from '../components/HotkeyInput';
 import { SettingsSection } from '../components/SettingsSection';
@@ -808,34 +807,60 @@ export const Assistant: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <Tabs
-        value={activeTab}
-        onValueChange={(value) => switchTab(value as Tab)}
-        className="flex min-h-0 flex-1 flex-col gap-0 bg-[#0f0f0f]"
-      >
-        <TabsList
-          variant="line"
-          className="h-auto w-full justify-start overflow-x-auto rounded-none border-b border-white/5 bg-[#0f0f0f] px-2 py-0 text-neutral-500 scrollbar-hide"
+      <div className="flex px-2 border-b border-white/5 shrink-0 bg-[#0f0f0f] overflow-x-auto scrollbar-hide">
+        <button
+          onClick={() => switchTab('prayers')}
+          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+            activeTab === 'prayers'
+              ? 'text-[#67E0A3] border-[#67E0A3]'
+              : 'text-neutral-500 border-transparent hover:text-neutral-300'
+          }`}
         >
-          <TabsTrigger value="prayers" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
-            Prayers
-          </TabsTrigger>
-          <TabsTrigger value="todos" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
-            To Do
-          </TabsTrigger>
-          <TabsTrigger value="focus" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
-            Focus
-          </TabsTrigger>
-          <TabsTrigger value="reflections" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
-            Reflections
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
-            Settings
-          </TabsTrigger>
-        </TabsList>
+          Prayers
+        </button>
+        <button
+          onClick={() => switchTab('todos')}
+          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+            activeTab === 'todos'
+              ? 'text-[#67E0A3] border-[#67E0A3]'
+              : 'text-neutral-500 border-transparent hover:text-neutral-300'
+          }`}
+        >
+          To Do
+        </button>
+        <button
+          onClick={() => switchTab('focus')}
+          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+            activeTab === 'focus'
+              ? 'text-[#67E0A3] border-[#67E0A3]'
+              : 'text-neutral-500 border-transparent hover:text-neutral-300'
+          }`}
+        >
+          Focus
+        </button>
+        <button
+          onClick={() => switchTab('reflections')}
+          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+            activeTab === 'reflections'
+              ? 'text-[#67E0A3] border-[#67E0A3]'
+              : 'text-neutral-500 border-transparent hover:text-neutral-300'
+          }`}
+        >
+          Reflections
+        </button>
+        <button
+          onClick={() => switchTab('settings')}
+          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+            activeTab === 'settings'
+              ? 'text-[#67E0A3] border-[#67E0A3]'
+              : 'text-neutral-500 border-transparent hover:text-neutral-300'
+          }`}
+        >
+          Settings
+        </button>
+      </div>
 
-        <TabsContent value="prayers" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
-          {activeTab === 'prayers' && (
+      {activeTab === 'prayers' && (
         <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
           {!currentPrayerDraft.hasSavedSettings && (
             <section className="border border-white/10 rounded-md p-3 bg-white/[0.03]">
@@ -964,11 +989,9 @@ export const Assistant: React.FC = () => {
             ))}
           </div>
         </div>
-          )}
-        </TabsContent>
+      )}
 
-        <TabsContent value="todos" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
-          {activeTab === 'todos' && (
+      {activeTab === 'todos' && (
         <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
           <div className="relative" ref={todoAddDropdownRef}>
             {!todoAddDropdownOpen ? (
@@ -1067,11 +1090,9 @@ export const Assistant: React.FC = () => {
             </section>
           )}
         </div>
-          )}
-        </TabsContent>
+      )}
 
-        <TabsContent value="focus" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
-          {activeTab === 'focus' && (
+      {activeTab === 'focus' && (
         <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
           <section className="text-center border border-white/10 rounded-md p-5 bg-white/[0.03]">
             <p className="text-xs text-neutral-500">{pomodoroState?.activeSession?.kind ?? 'focus'}</p>
@@ -1140,12 +1161,10 @@ export const Assistant: React.FC = () => {
           </div>
           <p className="text-xs text-neutral-500">Completed focus sessions: {pomodoroState?.completedFocusCount ?? 0}</p>
         </div>
-          )}
-        </TabsContent>
+      )}
 
-        {/* CONTENT: Reflections */}
-        <TabsContent value="reflections" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
-          {activeTab === 'reflections' && (
+      {/* CONTENT: Reflections */}
+      {activeTab === 'reflections' && (
         <div className="flex-1 flex flex-col overflow-y-auto p-4 scrollbar-hide">
 
           {quranStatusMessage && (
@@ -1324,12 +1343,10 @@ export const Assistant: React.FC = () => {
             </div>
           )}
         </div>
-          )}
-        </TabsContent>
+      )}
 
-        {/* CONTENT: Settings */}
-        <TabsContent value="settings" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
-          {activeTab === 'settings' && (
+      {/* CONTENT: Settings */}
+      {activeTab === 'settings' && (
         <div className="flex-1 flex flex-col overflow-y-auto p-5 space-y-4 scrollbar-hide">
           <SettingsSection title="Quran Reminders">
             <div className="space-y-4">
@@ -1881,9 +1898,7 @@ export const Assistant: React.FC = () => {
             <span>Quit {APP_DISPLAY_NAME}</span>
           </button>
         </div>
-          )}
-        </TabsContent>
-      </Tabs>
+      )}
 
       <KeychainConsentModal
         isOpen={keychainConsentOpen}
