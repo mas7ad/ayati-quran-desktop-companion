@@ -19,10 +19,7 @@ export const QUL_BUNDLE_VERSION = '2026.03.15.1';
 /** Keys that appear in `verse_scripts.mushaf_key` for this bundle. */
 export const QUL_VERSE_SCRIPT_KEYS: readonly QulVerseScriptMushafKey[] = [
   'madani1421',
-  'madaniTajweed',
-  'madaniV4Tajweed',
   'indoPakNastaleeq',
-  'qpcNastaleeq',
 ] as const;
 
 let sqlJsSingleton: Promise<SqlJsStatic> | undefined;
@@ -86,31 +83,20 @@ export function resolveSourceMushafKey(
   mushafKey: QulVerseScriptMushafKey,
   includeTajweed: boolean,
 ): QulVerseScriptMushafKey {
-  if (!includeTajweed) return mushafKey;
-  if (mushafKey === 'madani1421') return 'madaniV4Tajweed';
-  return 'madaniTajweed';
+  return mushafKey;
 }
 
 export function resolveFontMushafKey(
   mushafKey: QulVerseScriptMushafKey,
   includeTajweed: boolean,
 ): QulManifestMushafKey {
-  if (!includeTajweed) return mushafKey;
-  if (mushafKey === 'madani1421') return 'madaniV4Tajweed';
-  if (mushafKey === 'indoPakNastaleeq' || mushafKey === 'qpcNastaleeq') {
-    return 'indoPakNastaleeq';
-  }
-  return mushafRendererKind(mushafKey) === 'pageGlyph' ? 'madaniTajweed' : mushafKey;
+  return mushafKey;
 }
 
 export function resolveRendererKind(
   mushafKey: QulVerseScriptMushafKey,
   includeTajweed: boolean,
 ): QuranRendererKind {
-  if (includeTajweed && mushafKey === 'madani1421') {
-    return 'pageGlyph';
-  }
-  if (includeTajweed) return 'unicodeFont';
   return mushafRendererKind(mushafKey);
 }
 
@@ -242,11 +228,9 @@ export async function getQulRenderedVerse(
   const pageRaw = row[2];
   const pageNumber = pageRaw === null || pageRaw === undefined ? null : Number(pageRaw);
 
-  let taggedText: string | null =
-    params.includeTajweed && rendererKind === 'unicodeFont' ? processedText : null;
+  let taggedText: string | null = null;
 
-  const indoPakFamily =
-    params.mushafKey === 'indoPakNastaleeq' || params.mushafKey === 'qpcNastaleeq';
+  const indoPakFamily = params.mushafKey === 'indoPakNastaleeq';
   if (indoPakFamily && taggedText) {
     taggedText = convertVerseNumbersToIndoPakPUA(taggedText);
   }
@@ -258,9 +242,7 @@ export async function getQulRenderedVerse(
     if (taggedText) {
       taggedText = stripAyahZeroMarkers(taggedText).trim();
     }
-    const pageGlyphFamily =
-      params.mushafKey === 'madani1421' ||
-      params.mushafKey === 'madaniV4Tajweed';
+    const pageGlyphFamily = params.mushafKey === 'madani1421';
     if (pageGlyphFamily) {
       if (cleanText.length > 0) {
         cleanText = cleanText.slice(0, -1).trim();

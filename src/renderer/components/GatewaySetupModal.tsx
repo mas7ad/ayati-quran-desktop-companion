@@ -1,3 +1,5 @@
+import { APP_DISPLAY_NAME } from '../../shared/app-branding';
+
 interface GatewaySetupModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -31,7 +33,7 @@ export function GatewaySetupModal({ isOpen, onClose, onCheckConnection }: Gatewa
         <div className="mb-5">
           <h2 className="text-lg font-semibold text-white">AI provider required</h2>
           <p className="text-sm text-[#b9c9c1] mt-1">
-            Ayati - Quran Desktop Companion needs a connected vision provider before it can understand screenshots for ayah reflections.
+            {APP_DISPLAY_NAME} needs a connected vision provider before it can understand screenshots for ayah reflections.
           </p>
         </div>
 

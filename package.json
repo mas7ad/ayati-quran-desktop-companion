@@ -1,6 +1,6 @@
 {
   "name": "ayati-quran-desktop-companion",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "license": "SEE LICENSE IN LICENSE",
   "author": "Mikhail Wijanarko",
   "homepage": "https://ayati-website.vercel.app/",
@@ -76,7 +76,7 @@
     "icon": "assets/icon.png",
     "npmRebuild": false,
     "mac": {
-      "identity": "Developer ID Application: Mikhail Wijanarko (WH4MT5Z44S)",
+      "identity": "Mikhail Wijanarko (WH4MT5Z44S)",
       "category": "public.app-category.productivity",
       "target": [
         {
@@ -101,8 +101,9 @@
         "teamId": "WH4MT5Z44S"
       },
       "extendInfo": {
-        "NSScreenCaptureUsageDescription": "Ayati - Quran Desktop Companion does not use screen capture for Quran reflections.",
-        "NSAppleEventsUsageDescription": "Ayati - Quran Desktop Companion needs this to detect which app you're using."
+        "CFBundleDisplayName": "Ayati",
+        "NSScreenCaptureUsageDescription": "Ayati does not use screen capture for Quran reflections.",
+        "NSAppleEventsUsageDescription": "Ayati needs this to detect which app you're using."
       }
     },
     "win": {

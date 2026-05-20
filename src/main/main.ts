@@ -19,9 +19,10 @@ import {
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import https from 'https';
 import { execFile, execSync } from 'child_process';
 import { promisify } from 'util';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { config } from 'dotenv';
 import { autoUpdater } from 'electron-updater';
 import sharp from 'sharp';
@@ -40,7 +41,9 @@ import { fetchVerseContentForReflection as fetchVerseContentWithFallback } from 
 import {
   createDefaultAyahLensState,
   addReflectionToCollectionLocal,
+  clearPendingSyncAction,
   deleteReflection,
+  listReflectionIdsNeedingBookmarkSync,
   markReflectionPendingSync,
   markReflectionSynced,
   saveReflectionLocally,
@@ -67,7 +70,14 @@ import type {
 } from './ayah-types';
 import { createPkcePair, QuranFoundationClient, QuranFoundationError, type StoredTokenSet } from './quran-foundation-client';
 import { QURAN_OAUTH_SCOPES } from './quran-oauth-scopes';
-import { resolveQuranClientConfig } from './quran-runtime-config';
+import { DEFAULT_PUBLIC_QURAN_CLIENT_ID, resolveQuranClientConfig } from './quran-runtime-config';
+import {
+  acknowledgeKeychainConsent,
+  ensureKeychainConsent,
+  getKeychainConsentStatus,
+  isMacKeychainEncryptionAvailable,
+  KEYCHAIN_CONSENT_DENIED_MESSAGE,
+} from './keychain-consent';
 import {
   coerceQulVerseScriptMushafKey,
   getQulRenderedVerse,
@@ -81,6 +91,7 @@ import { getDefaultClawBotModel } from './ai-provider-defaults';
 import { DEFAULT_HOTKEYS, sanitizeAccelerator } from './hotkeys';
 import { getAiProviderConfig } from './ai-providers';
 import { getWindowPositionNearAnchor } from './window-positioning';
+import { APP_DISPLAY_NAME, APP_FULL_NAME } from '../shared/app-branding';
 import { PET_WINDOW_HEIGHT, PET_WINDOW_WIDTH } from '../shared/pet-window-size';
 import { getAssistantWindowStackingPolicy } from './window-stacking-policy';
 import { enforceSingleInstanceApp } from './single-instance';
@@ -106,6 +117,13 @@ import {
   type DesktopUpdateCheckResult,
   type DesktopUpdateState,
 } from './updates';
+import {
+  getUpdateMetadataPlatformKey,
+  isVersionGreater,
+  parseUpdateMetadata,
+  selectUpdateFromMetadata,
+  type SelectedUpdateMetadata,
+} from './update-metadata';
 import { fetchPrayerTimesByCity } from './prayer-times-client';
 import {
   isInsidePrayerQuietWindow,
@@ -117,6 +135,7 @@ import {
   deleteTodo as deleteTodoItem,
   getDueTodoReminder,
   listTodos,
+  purgeCompletedTodos,
   setTodoCompleted,
   updateTodo,
 } from './todo-store';
@@ -138,10 +157,13 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-// Load environment variables from repo root (.env then .env.local overrides)
-const repoRoot = process.cwd();
-config({ path: path.join(repoRoot, '.env') });
-config({ path: path.join(repoRoot, '.env.local'), override: true });
+// Load local env files for development only. Packaged release builds use baked-in
+// production defaults and the Vercel OAuth proxy — never ship or load secrets from disk.
+if (!app.isPackaged) {
+  const repoRoot = process.cwd();
+  config({ path: path.join(repoRoot, '.env') });
+  config({ path: path.join(repoRoot, '.env.local'), override: true });
+}
 
 // Fix transparent window rendering on some Mac hardware (e.g. Mac Mini)
 // Electron has a bug where transparent windows < 162px become opaque on external/4K displays
@@ -160,7 +182,7 @@ let onboardingWindow: BrowserWindow | null = null;
 let petContextMenuWindow: BrowserWindow | null = null;
 let workspaceBrowserWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
-const DEFAULT_TRAY_TOOLTIP = 'Ayati - Quran Desktop Companion';
+const DEFAULT_TRAY_TOOLTIP = APP_DISPLAY_NAME;
 let isChatbarWindowReady = false;
 let shouldRevealChatbarWhenReady = false;
 let shouldRevealAssistantWhenReady = false;
@@ -189,7 +211,7 @@ let ayahPendingReflectionEchoUntil = 0;
 let watchers: Watchers | null = null;
 let clawbot: ClawBotClient | null = null;
 const store = createStore();
-let quranOAuthSession: { state: string; nonce: string; verifier: string } | null = null;
+let quranOAuthSession: { state: string; nonce: string; verifier: string; createdAt: number } | null = null;
 const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
   platform: process.platform,
   processArch: process.arch,
@@ -204,6 +226,8 @@ let updateDownloadInFlight = false;
 let updateInstallInFlight = false;
 let updateStartupTimer: NodeJS.Timeout | null = null;
 let updatePollTimer: NodeJS.Timeout | null = null;
+let pendingWebsiteUpdate: SelectedUpdateMetadata | null = null;
+let downloadedWebsiteUpdatePath: string | null = null;
 
 const isDev = !app.isPackaged;
 const DEV_PORT = process.env.VITE_DEV_PORT || '5173';
@@ -213,8 +237,11 @@ const UPDATE_CHECK_CHANNEL = 'update-check';
 const UPDATE_DOWNLOAD_CHANNEL = 'update-download';
 const UPDATE_INSTALL_CHANNEL = 'update-install';
 const AUTO_UPDATE_STARTUP_DELAY_MS = 10_000;
-/** Background check interval when auto-updates are enabled (electron-updater). */
+/** Background check interval when auto-updates are enabled. */
 const AUTO_UPDATE_POLL_INTERVAL_MS = 60 * 60 * 1000;
+const DEFAULT_UPDATE_METADATA_URL = 'https://ayati-website.vercel.app/update/latest.json';
+const UPDATE_METADATA_URL = process.env.AYATI_UPDATE_METADATA_URL || DEFAULT_UPDATE_METADATA_URL;
+const USE_WEBSITE_UPDATE_METADATA = process.env.AYATI_USE_ELECTRON_UPDATER !== 'true';
 const REQUIRED_QURAN_DEMO_SCOPES = [
   'collection',
   'collection.create',
@@ -226,6 +253,7 @@ const REQUIRED_QURAN_DEMO_SCOPES = [
   'streak.read',
 ] as const;
 const DEFAULT_ACTIVITY_SECONDS = 30;
+const QURAN_OAUTH_SESSION_TTL_MS = 10 * 60 * 1000;
 const DEV_WINDOW_BORDER_CSS = `
   html, body {
     box-sizing: border-box !important;
@@ -235,6 +263,10 @@ const DEV_WINDOW_BORDER_CSS = `
 const debugBorderStyleKeys = new WeakMap<BrowserWindow, string>();
 
 const shouldStartApp = enforceSingleInstanceApp(app, getSingleInstanceFocusWindow);
+
+if (shouldStartApp) {
+  app.setName(APP_DISPLAY_NAME);
+}
 
 function getAssetPath(fileName: string): string {
   return isDev
@@ -284,11 +316,11 @@ function buildProviderHeaders(url: string, token: string, provider: ClawBotProvi
   }
   try {
     if (new URL(url).hostname.endsWith('openrouter.ai')) {
-      headers['X-OpenRouter-Title'] = 'Ayati - Quran Desktop Companion';
+      headers['X-OpenRouter-Title'] = APP_FULL_NAME;
     }
   } catch {
     if (url.includes('openrouter.ai')) {
-      headers['X-OpenRouter-Title'] = 'Ayati - Quran Desktop Companion';
+      headers['X-OpenRouter-Title'] = APP_FULL_NAME;
     }
   }
   return headers;
@@ -357,8 +389,14 @@ function getAyahLensState(): AyahLensState {
   const defaultState = createDefaultAyahLensState();
   const mergedPreferences = { ...defaultState.preferences, ...stored.preferences } as AyahLensSettings & { maxNudgesPerDay?: number };
   const { maxNudgesPerDay: _legacyMaxNudgesPerDay, ...preferences } = mergedPreferences;
-  if (preferences.qulMushafKey === 'madaniTajweed' || preferences.qulMushafKey === 'madani1405') {
+  if (
+    preferences.qulMushafKey === 'madaniTajweed' ||
+    preferences.qulMushafKey === 'madani1405' ||
+    preferences.qulMushafKey === 'madaniV4Tajweed'
+  ) {
     preferences.qulMushafKey = 'madani1421';
+  } else if (preferences.qulMushafKey === 'qpcNastaleeq') {
+    preferences.qulMushafKey = 'indoPakNastaleeq';
   }
 
   return {
@@ -431,7 +469,16 @@ function decryptSecret(value: string | null | undefined): string | null {
   }
 }
 
-function persistQuranUserTokens(tokens: StoredTokenSet): QuranAuthStatus {
+async function persistQuranUserTokens(tokens: StoredTokenSet): Promise<QuranAuthStatus> {
+  const granted = await ensureKeychainConsent(store, dialog);
+  if (!granted) {
+    return {
+      isConnected: false,
+      scopes: [],
+      error: KEYCHAIN_CONSENT_DENIED_MESSAGE,
+    };
+  }
+
   const state = getAyahLensState();
   const nextState: AyahLensState = {
     ...state,
@@ -444,7 +491,11 @@ function persistQuranUserTokens(tokens: StoredTokenSet): QuranAuthStatus {
     },
   };
   setAyahLensState(nextState);
-  return getQuranAuthStatusFromState(nextState);
+  const status = getQuranAuthStatusFromState(nextState);
+  if (status.isConnected) {
+    void syncPendingAyahReflections();
+  }
+  return status;
 }
 
 function getQuranAuthStatusFromState(state: AyahLensState): QuranAuthStatus {
@@ -465,8 +516,23 @@ function getQuranAuthStatus(): QuranAuthStatus {
   return getQuranAuthStatusFromState(getAyahLensState());
 }
 
+function deliverQuranOAuthCallback(callbackUrl: string): void {
+  const targetWindow = assistantWindow && !assistantWindow.isDestroyed() ? assistantWindow : null;
+  targetWindow?.webContents.send('ayah-oauth-callback', callbackUrl);
+}
+
 async function getQuranUserAccessToken(): Promise<string | null> {
   const state = getAyahLensState();
+  const hasEncryptedSecrets = Boolean(
+    state.quranAuth.encryptedAccessToken || state.quranAuth.encryptedRefreshToken,
+  );
+  if (hasEncryptedSecrets && isMacKeychainEncryptionAvailable()) {
+    const granted = await ensureKeychainConsent(store, dialog);
+    if (!granted) {
+      return null;
+    }
+  }
+
   const accessToken = decryptSecret(state.quranAuth.encryptedAccessToken);
   const expiresAt = state.quranAuth.expiresAt ?? 0;
 
@@ -481,7 +547,7 @@ async function getQuranUserAccessToken(): Promise<string | null> {
 
   try {
     const tokens = await getQuranClient().refreshToken(refreshToken);
-    persistQuranUserTokens({
+    await persistQuranUserTokens({
       ...tokens,
       refreshToken: tokens.refreshToken ?? refreshToken,
       userName: tokens.userName ?? state.quranAuth.userName,
@@ -523,12 +589,19 @@ function getReflectionErrorMessage(error: unknown): string {
     return error;
   }
 
-  return 'Ayati - Quran Desktop Companion could not create a reflection right now.';
+  return `${APP_DISPLAY_NAME} could not create a reflection right now.`;
 }
 
 async function getQuranContentAccessToken(): Promise<string | null> {
   const userToken = await getQuranUserAccessToken();
   if (userToken) return userToken;
+
+  if (isMacKeychainEncryptionAvailable()) {
+    const granted = await ensureKeychainConsent(store, dialog);
+    if (!granted) {
+      return null;
+    }
+  }
 
   const state = getAyahLensState();
   const contentToken = decryptSecret(state.contentAuth.encryptedAccessToken);
@@ -747,6 +820,84 @@ function buildAyahReflection(
   };
 }
 
+async function syncBookmarkForReflection(reflectionId: string, accessToken: string): Promise<boolean> {
+  const reflection = getAyahLensState().reflections.find((item) => item.id === reflectionId);
+  if (!reflection?.savedAt || reflection.quranBookmarkId) {
+    return true;
+  }
+
+  try {
+    const result = await getQuranClient().createBookmark(accessToken, {
+      verseKey: reflection.verseKey,
+      mushafId: getAyahLensState().preferences.mushafId,
+    });
+    setAyahLensState(markReflectionSynced(getAyahLensState(), reflectionId, result.bookmarkId));
+    const syncedReflection = getAyahLensState().reflections.find((item) => item.id === reflectionId);
+    if (syncedReflection) {
+      await recordReflectionActivity(syncedReflection);
+    }
+    return true;
+  } catch {
+    setAyahLensState(markReflectionPendingSync(getAyahLensState(), reflectionId, 'bookmark'));
+    return false;
+  }
+}
+
+async function syncNoteForReflection(reflectionId: string, accessToken: string): Promise<boolean> {
+  const reflection = getAyahLensState().reflections.find((item) => item.id === reflectionId);
+  const body = reflection?.note?.body?.trim();
+  if (!reflection || !body || reflection.note?.quranNoteId) {
+    return true;
+  }
+
+  try {
+    const quranNoteId = await getQuranClient().createNote(accessToken, {
+      reflectionId,
+      verseKey: reflection.verseKey,
+      body,
+    });
+    const nextState = clearPendingSyncAction(
+      saveReflectionNoteLocal(getAyahLensState(), reflectionId, {
+        body,
+        quranNoteId: quranNoteId ?? undefined,
+        syncState: quranNoteId ? 'synced' : 'local',
+      }),
+      reflectionId,
+      'note',
+    );
+    setAyahLensState(nextState);
+    return true;
+  } catch {
+    const noteState = saveReflectionNoteLocal(getAyahLensState(), reflectionId, {
+      body,
+      syncState: 'pending',
+    });
+    setAyahLensState(markReflectionPendingSync(noteState, reflectionId, 'note'));
+    return false;
+  }
+}
+
+async function syncPendingAyahReflections(): Promise<void> {
+  const accessToken = await getQuranUserAccessToken();
+  if (!accessToken) return;
+
+  const bookmarkIds = listReflectionIdsNeedingBookmarkSync(getAyahLensState());
+  for (const reflectionId of bookmarkIds) {
+    await syncBookmarkForReflection(reflectionId, accessToken);
+  }
+
+  const noteIds = [...new Set(
+    getAyahLensState().pendingSync
+      .filter((item) => item.action === 'note')
+      .map((item) => item.reflectionId),
+  )];
+  for (const reflectionId of noteIds) {
+    await syncNoteForReflection(reflectionId, accessToken);
+  }
+
+  broadcastReflectionsUpdated();
+}
+
 async function recordReflectionActivity(reflection: AyahReflection): Promise<void> {
   const accessToken = await getQuranUserAccessToken();
   if (!accessToken) return;
@@ -772,28 +923,22 @@ async function saveAyahReflectionById(reflectionId: string): Promise<AyahReflect
     ...reflection,
     savedAt: reflection.savedAt ?? Date.now(),
   };
-  setAyahLensState(updateReflection(state, savedReflection));
+  setAyahLensState(updateReflection(getAyahLensState(), savedReflection));
 
   const accessToken = await getQuranUserAccessToken();
   if (!accessToken) {
-    return savedReflection;
-  }
-
-  try {
-    const result = await getQuranClient().createBookmark(accessToken, {
-      verseKey: reflection.verseKey,
-      mushafId: state.preferences.mushafId,
-    });
-    const syncedState = markReflectionSynced(getAyahLensState(), reflectionId, result.bookmarkId);
-    setAyahLensState(syncedState);
-    const syncedReflection = syncedState.reflections.find((item) => item.id === reflectionId) ?? savedReflection;
-    await recordReflectionActivity(syncedReflection);
-    return getAyahLensState().reflections.find((item) => item.id === reflectionId) ?? syncedReflection;
-  } catch {
     const pendingState = markReflectionPendingSync(getAyahLensState(), reflectionId, 'bookmark');
     setAyahLensState(pendingState);
+    broadcastReflectionsUpdated();
     return pendingState.reflections.find((item) => item.id === reflectionId) ?? savedReflection;
   }
+
+  const synced = await syncBookmarkForReflection(reflectionId, accessToken);
+  broadcastReflectionsUpdated();
+  if (!synced) {
+    return getAyahLensState().reflections.find((item) => item.id === reflectionId) ?? savedReflection;
+  }
+  return getAyahLensState().reflections.find((item) => item.id === reflectionId) ?? savedReflection;
 }
 
 async function saveAyahReflectionNoteById(reflectionId: string, body: string): Promise<AyahReflection | null> {
@@ -1022,7 +1167,7 @@ function copyReflectionShareCard(reflectionId: string): boolean {
     reflection.arabicText,
     reflection.translation,
     reflection.note?.body ? `Note: ${reflection.note.body}` : null,
-    'Shared from Ayati - Quran Desktop Companion',
+    `Shared from ${APP_DISPLAY_NAME}`,
   ].filter(Boolean);
   clipboard.writeText(lines.join('\n\n'));
   return true;
@@ -1045,7 +1190,7 @@ function updateAyahLensSetting(key: string, value: unknown): AyahLensSettings {
   } else if (key === 'timedReminders' && typeof value === 'boolean') {
     preferences.timedReminders = value;
   } else if (key === 'timedReminderMinutes' && typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 1440) {
-    preferences.timedReminderMinutes = value;
+    preferences.timedReminderMinutes = Math.max(1, value);
   } else if (key === 'tafsirResourceId' && (value === null || (typeof value === 'number' && Number.isInteger(value) && value > 0))) {
     preferences.tafsirResourceId = value;
   } else if (key === 'tafsirResourceName' && (value === null || typeof value === 'string')) {
@@ -1061,7 +1206,7 @@ function updateAyahLensSetting(key: string, value: unknown): AyahLensSettings {
   } else if (key === 'qulMushafKey' && typeof value === 'string' && new Set(QUL_VERSE_SCRIPT_KEYS).has(value as (typeof QUL_VERSE_SCRIPT_KEYS)[number])) {
     preferences.qulMushafKey = value;
   } else {
-    throw new Error('Unknown or invalid Ayati - Quran Desktop Companion setting.');
+    throw new Error(`Unknown or invalid ${APP_DISPLAY_NAME} setting.`);
   }
 
   setAyahLensState({ ...state, preferences });
@@ -1187,7 +1332,6 @@ let todoReminderInterval: NodeJS.Timeout | null = null;
 let pomodoroInterval: NodeJS.Timeout | null = null;
 let isCapturingAyahReflection = false;
 const IDLE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
-const DEFAULT_TIMED_QURAN_REMINDER_MINUTES = 15;
 
 // Pet movement animation state
 let moveAnimation: NodeJS.Timeout | null = null;
@@ -2486,7 +2630,7 @@ async function maybeSendContextualQuranNudge(
     });
   } catch (error) {
     const message = getSafeErrorMessage(error);
-    console.error('[Ayati - Quran Desktop Companion] Failed to build contextual Quran nudge:', error);
+    console.error(`[${APP_DISPLAY_NAME}] Failed to build contextual Quran nudge:`, error);
     petWindow.webContents.send('chat-popup', {
       id: randomUUID(),
       text: `Quran Foundation error: ${message}`,
@@ -2542,7 +2686,7 @@ async function maybeSendTimedQuranReminder(options: { force?: boolean } = {}): P
     });
   } catch (error) {
     const message = getSafeErrorMessage(error);
-    console.error('[Ayati - Quran Desktop Companion] Failed to build timed Quran reminder:', error);
+    console.error(`[${APP_DISPLAY_NAME}] Failed to build timed Quran reminder:`, error);
     showPetChat(
       {
         id: randomUUID(),
@@ -2577,14 +2721,15 @@ function stopTimedQuranReminders(): void {
 function scheduleTimedQuranReminders(): void {
   stopTimedQuranReminders();
 
-  const { timedReminders, timedReminderMinutes } = getAyahLensState().preferences;
+  const { timedReminders } = getAyahLensState().preferences;
   if (!timedReminders) return;
 
-  const intervalMinutes = Math.max(1, Math.min(1440, timedReminderMinutes || DEFAULT_TIMED_QURAN_REMINDER_MINUTES));
+  // Poll once per minute instead of recreating native timers whenever the user edits
+  // the reminder interval. The per-user interval is still enforced in
+  // buildTimedQuranReminder/canShowTimedReminder via lastTimedReminderAt.
   timedQuranReminderInterval = setInterval(() => {
     void maybeSendTimedQuranReminder();
-  }, intervalMinutes * 60 * 1000);
-  timedQuranReminderInterval.unref?.();
+  }, 60 * 1000);
 }
 
 async function maybeSendPrayerReminder(): Promise<boolean> {
@@ -2625,6 +2770,25 @@ async function maybeSendPrayerReminder(): Promise<boolean> {
     text: `${reminder.prayer.label} is coming up at ${reminder.prayer.time}. Take a moment to prepare.`,
     quickReplies: ['Got it', 'Open Prayers', 'Not now'],
   });
+  return true;
+}
+
+function broadcastTodosUpdated(): void {
+  if (!assistantWindow || assistantWindow.isDestroyed()) return;
+  assistantWindow.webContents.send('todos-updated', listTodos(getAyahLensState().todos));
+}
+
+function broadcastReflectionsUpdated(): void {
+  if (!assistantWindow || assistantWindow.isDestroyed()) return;
+  assistantWindow.webContents.send('reflections-updated');
+}
+
+function maintainStoredTodos(now: number = Date.now()): boolean {
+  const state = getAyahLensState();
+  const todos = purgeCompletedTodos(state.todos, now);
+  if (todos === state.todos) return false;
+  setAyahLensState({ ...state, todos });
+  broadcastTodosUpdated();
   return true;
 }
 
@@ -2868,7 +3032,9 @@ function schedulePrayerAwareness(): void {
 
 function scheduleTodoReminders(): void {
   if (todoReminderInterval) clearInterval(todoReminderInterval);
+  maintainStoredTodos();
   todoReminderInterval = setInterval(() => {
+    maintainStoredTodos();
     maybeSendTodoReminder();
   }, 60 * 1000);
   todoReminderInterval.unref?.();
@@ -4089,6 +4255,8 @@ function startMainApp() {
     petWindow?.webContents.send('cron-error', data);
     assistantWindow?.webContents.send('cron-error', data);
   });
+
+  void syncPendingAyahReflections();
 }
 
 // Screen capture - uses native capture for speed
@@ -4391,9 +4559,27 @@ function setupIPC() {
     const pkce = createPkcePair();
     const state = randomUUID();
     const nonce = randomUUID();
-    quranOAuthSession = { state, nonce, verifier: pkce.verifier };
+    quranOAuthSession = { state, nonce, verifier: pkce.verifier, createdAt: Date.now() };
 
-    const authorizeUrl = getQuranClient().buildAuthorizeUrl({
+    const quranConfig = resolveQuranClientConfig({
+      state: getAyahLensState(),
+      env: process.env,
+      decryptSecret,
+    });
+    const envClientId = process.env.QF_CLIENT_ID?.trim() || process.env.QURAN_CLIENT_ID?.trim();
+    const hasEnvClientSecret = Boolean(process.env.QF_CLIENT_SECRET?.trim() || process.env.QURAN_CLIENT_SECRET?.trim());
+    if (
+      quranConfig.clientId === DEFAULT_PUBLIC_QURAN_CLIENT_ID
+      && hasEnvClientSecret
+      && envClientId === DEFAULT_PUBLIC_QURAN_CLIENT_ID
+    ) {
+      throw new QuranFoundationError(
+        'missing_config',
+        'QF_CLIENT_ID is the public Ayati id, but your redirect URI is registered on your personal Quran Foundation client. Set QF_CLIENT_ID in .env.local to the client id from your Request Access approval (the one that registered your redirect URI).',
+      );
+    }
+
+    const authorizeUrl = new QuranFoundationClient(quranConfig).buildAuthorizeUrl({
       state,
       nonce,
       codeChallenge: pkce.challenge,
@@ -4408,6 +4594,7 @@ function setupIPC() {
       const url = new URL(callbackUrl);
       const error = url.searchParams.get('error');
       if (error) {
+        quranOAuthSession = null;
         return {
           isConnected: false,
           scopes: [],
@@ -4417,7 +4604,9 @@ function setupIPC() {
 
       const state = url.searchParams.get('state');
       const code = url.searchParams.get('code');
-      if (!code || !quranOAuthSession || state !== quranOAuthSession.state) {
+      const session = quranOAuthSession;
+      quranOAuthSession = null;
+      if (!code || !session || state !== session.state || Date.now() - session.createdAt > QURAN_OAUTH_SESSION_TTL_MS) {
         return {
           isConnected: false,
           scopes: [],
@@ -4427,11 +4616,10 @@ function setupIPC() {
 
       const tokens = await getQuranClient().exchangeAuthorizationCode(
         code,
-        quranOAuthSession.verifier,
-        quranOAuthSession.nonce,
+        session.verifier,
+        session.nonce,
       );
-      quranOAuthSession = null;
-      return persistQuranUserTokens(tokens);
+      return await persistQuranUserTokens(tokens);
     } catch (error) {
       const safeMessage = error instanceof QuranFoundationError
         ? error.safeMessage
@@ -4442,6 +4630,20 @@ function setupIPC() {
         error: safeMessage,
       } satisfies QuranAuthStatus;
     }
+  });
+
+  ipcMain.handle('keychain-consent-status', () => {
+    return getKeychainConsentStatus(store, getAyahLensState());
+  });
+
+  ipcMain.handle('keychain-consent-acknowledge', () => {
+    acknowledgeKeychainConsent(store);
+    return true;
+  });
+
+  ipcMain.handle('keychain-consent-ensure', async () => {
+    const granted = await ensureKeychainConsent(store, dialog);
+    return { granted };
   });
 
   ipcMain.handle('quran-auth-status', () => {
@@ -4495,7 +4697,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('ayah-history', () => {
-    return getAyahLensState().reflections;
+    return getAyahLensState().reflections.filter((reflection) => Boolean(reflection.savedAt));
   });
 
   ipcMain.handle('ayah-delete-reflection', (_event, reflectionId: string) => {
@@ -4611,7 +4813,7 @@ function setupIPC() {
   ipcMain.handle('ayah-settings-update', (_event, key: string, value: unknown) => {
     try {
       const nextSettings = updateAyahLensSetting(key, value);
-      if (key === 'timedReminders' || key === 'timedReminderMinutes') {
+      if (key === 'timedReminders') {
         scheduleTimedQuranReminders();
       }
       return nextSettings;
@@ -4699,34 +4901,37 @@ function setupIPC() {
     return { today: latest.today, tomorrow: latest.tomorrow };
   });
 
-  ipcMain.handle('todo-list', () => listTodos(getAyahLensState().todos));
+  ipcMain.handle('todo-list', () => {
+    maintainStoredTodos();
+    return listTodos(getAyahLensState().todos);
+  });
 
   ipcMain.handle('todo-settings-update', (_event, patch: Partial<TodoSettings>) => updateTodoSettings(patch ?? {}));
 
   ipcMain.handle('todo-create', (_event, input: Parameters<typeof createTodo>[1]) => {
     const state = getAyahLensState();
-    const todos = createTodo(state.todos, input);
+    const todos = purgeCompletedTodos(createTodo(state.todos, input));
     setAyahLensState({ ...state, todos });
     return listTodos(todos);
   });
 
   ipcMain.handle('todo-update', (_event, todoId: string, patch: Parameters<typeof updateTodo>[2]) => {
     const state = getAyahLensState();
-    const todos = updateTodo(state.todos, todoId, patch ?? {});
+    const todos = purgeCompletedTodos(updateTodo(state.todos, todoId, patch ?? {}));
     setAyahLensState({ ...state, todos });
     return listTodos(todos);
   });
 
   ipcMain.handle('todo-complete', (_event, todoId: string, completed: boolean) => {
     const state = getAyahLensState();
-    const todos = setTodoCompleted(state.todos, todoId, completed);
+    const todos = purgeCompletedTodos(setTodoCompleted(state.todos, todoId, completed));
     setAyahLensState({ ...state, todos });
     return listTodos(todos);
   });
 
   ipcMain.handle('todo-delete', (_event, todoId: string) => {
     const state = getAyahLensState();
-    const todos = deleteTodoItem(state.todos, todoId);
+    const todos = purgeCompletedTodos(deleteTodoItem(state.todos, todoId));
     setAyahLensState({ ...state, todos });
     return listTodos(todos);
   });
@@ -5290,6 +5495,217 @@ function registerConfiguredHotkey(key: string, fallback: string, callback: () =>
   return accelerator;
 }
 
+function getWebsiteUpdatePlatformKey() {
+  return getUpdateMetadataPlatformKey(process.platform, desktopRuntimeInfo.appArch);
+}
+
+function requestText(url: string, redirectCount = 0): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { headers: { Accept: 'application/json' } }, (response) => {
+      const statusCode = response.statusCode ?? 0;
+      const location = response.headers.location;
+      if (statusCode >= 300 && statusCode < 400 && location) {
+        response.resume();
+        if (redirectCount >= 5) {
+          reject(new Error('Too many redirects while fetching update metadata.'));
+          return;
+        }
+        resolve(requestText(new URL(location, url).toString(), redirectCount + 1));
+        return;
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
+        response.resume();
+        reject(new Error(`Update metadata request failed with HTTP ${statusCode}.`));
+        return;
+      }
+
+      response.setEncoding('utf8');
+      let body = '';
+      response.on('data', (chunk) => {
+        body += chunk;
+      });
+      response.on('end', () => resolve(body));
+    });
+
+    request.on('error', reject);
+    request.setTimeout(30_000, () => {
+      request.destroy(new Error('Update metadata request timed out.'));
+    });
+  });
+}
+
+async function downloadFileWithProgress(
+  url: string,
+  destinationPath: string,
+  onProgress: (percent: number) => void,
+  redirectCount = 0,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const request = https.get(url, (response) => {
+      const statusCode = response.statusCode ?? 0;
+      const location = response.headers.location;
+      if (statusCode >= 300 && statusCode < 400 && location) {
+        response.resume();
+        if (redirectCount >= 5) {
+          reject(new Error('Too many redirects while downloading update.'));
+          return;
+        }
+        downloadFileWithProgress(new URL(location, url).toString(), destinationPath, onProgress, redirectCount + 1)
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
+
+      if (statusCode < 200 || statusCode >= 300) {
+        response.resume();
+        reject(new Error(`Update download failed with HTTP ${statusCode}.`));
+        return;
+      }
+
+      const totalBytes = Number(response.headers['content-length'] ?? 0);
+      let receivedBytes = 0;
+      const output = fs.createWriteStream(destinationPath);
+
+      response.on('data', (chunk: Buffer) => {
+        receivedBytes += chunk.length;
+        if (totalBytes > 0) {
+          onProgress((receivedBytes / totalBytes) * 100);
+        }
+      });
+      response.pipe(output);
+      output.on('finish', () => {
+        output.close(() => {
+          onProgress(100);
+          resolve();
+        });
+      });
+      output.on('error', reject);
+      response.on('error', reject);
+    });
+
+    request.on('error', reject);
+    request.setTimeout(120_000, () => {
+      request.destroy(new Error('Update download timed out.'));
+    });
+  });
+}
+
+function sha256File(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const input = fs.createReadStream(filePath);
+    input.on('data', (chunk) => hash.update(chunk));
+    input.on('error', reject);
+    input.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+function getInstallerFileName(update: SelectedUpdateMetadata): string {
+  const urlPath = new URL(update.url).pathname;
+  const parsedName = path.basename(urlPath);
+  if (parsedName && parsedName !== '/') return parsedName;
+  const extension = process.platform === 'win32' ? 'exe' : 'dmg';
+  return `Ayati-${update.version}.${extension}`;
+}
+
+async function checkWebsiteUpdateMetadata(): Promise<boolean> {
+  const platformKey = getWebsiteUpdatePlatformKey();
+  if (!platformKey) {
+    setUpdateState(reduceUpdateStateOnCheckFailure(
+      updateState,
+      'Automatic updates are not available for this platform yet.',
+      new Date().toISOString(),
+    ));
+    return true;
+  }
+
+  try {
+    const rawMetadata = await requestText(UPDATE_METADATA_URL);
+    const metadata = parseUpdateMetadata(rawMetadata);
+    const selectedUpdate = selectUpdateFromMetadata(metadata, platformKey);
+    if (!selectedUpdate) {
+      setUpdateState(reduceUpdateStateOnCheckFailure(
+        updateState,
+        `No update download is published for ${platformKey}.`,
+        new Date().toISOString(),
+      ));
+      return true;
+    }
+
+    if (!isVersionGreater(selectedUpdate.version, app.getVersion())) {
+      pendingWebsiteUpdate = null;
+      downloadedWebsiteUpdatePath = null;
+      setUpdateState(reduceUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
+      return true;
+    }
+
+    pendingWebsiteUpdate = selectedUpdate;
+    downloadedWebsiteUpdatePath = null;
+    setUpdateState(reduceUpdateStateOnUpdateAvailable(updateState, selectedUpdate.version, new Date().toISOString()));
+    return true;
+  } catch (error) {
+    const message = getSafeErrorMessage(error);
+    setUpdateState(reduceUpdateStateOnCheckFailure(updateState, message, new Date().toISOString()));
+    console.error('[AutoUpdater] Failed to check website update metadata:', error);
+    return true;
+  }
+}
+
+async function downloadWebsiteUpdate(): Promise<{ accepted: boolean; completed: boolean }> {
+  if (!pendingWebsiteUpdate || updateState.status !== 'available') {
+    return { accepted: false, completed: false };
+  }
+
+  const update = pendingWebsiteUpdate;
+  const updatesDirectory = path.join(app.getPath('userData'), 'updates');
+  fs.mkdirSync(updatesDirectory, { recursive: true });
+  const destinationPath = path.join(updatesDirectory, getInstallerFileName(update));
+  if (fs.existsSync(destinationPath)) fs.unlinkSync(destinationPath);
+
+  setUpdateState(reduceUpdateStateOnDownloadStart(updateState));
+
+  try {
+    await downloadFileWithProgress(update.url, destinationPath, (percent) => {
+      if (shouldBroadcastDownloadProgress(updateState, percent) || updateState.message !== null) {
+        setUpdateState(reduceUpdateStateOnDownloadProgress(updateState, percent));
+      }
+    });
+
+    if (update.sha256 && update.sha256 !== 'TODO') {
+      const actualHash = await sha256File(destinationPath);
+      if (actualHash.toLowerCase() !== update.sha256.toLowerCase()) {
+        fs.unlinkSync(destinationPath);
+        throw new Error('Downloaded update failed SHA-256 verification.');
+      }
+    }
+
+    downloadedWebsiteUpdatePath = destinationPath;
+    setUpdateState(reduceUpdateStateOnDownloadComplete(updateState, update.version));
+    return { accepted: true, completed: true };
+  } catch (error) {
+    const message = getSafeErrorMessage(error);
+    setUpdateState(reduceUpdateStateOnDownloadFailure(updateState, message));
+    console.error('[AutoUpdater] Failed to download website update:', error);
+    return { accepted: true, completed: false };
+  }
+}
+
+async function openWebsiteUpdateInstaller(): Promise<{ accepted: boolean; completed: boolean }> {
+  if (!downloadedWebsiteUpdatePath || updateState.status !== 'downloaded') {
+    return { accepted: false, completed: false };
+  }
+
+  const errorMessage = await shell.openPath(downloadedWebsiteUpdatePath);
+  if (errorMessage) {
+    setUpdateState(reduceUpdateStateOnInstallFailure(updateState, errorMessage));
+    return { accepted: true, completed: false };
+  }
+
+  app.quit();
+  return { accepted: true, completed: false };
+}
+
 function readAppUpdateYml(): Record<string, string> | null {
   try {
     const ymlPath = app.isPackaged
@@ -5310,6 +5726,7 @@ function readAppUpdateYml(): Record<string, string> | null {
 }
 
 function hasUpdateFeedConfig(): boolean {
+  if (USE_WEBSITE_UPDATE_METADATA) return Boolean(UPDATE_METADATA_URL);
   return readAppUpdateYml() !== null || Boolean(process.env.AYATI_MOCK_UPDATE_URL);
 }
 
@@ -5365,6 +5782,10 @@ async function checkForUpdates(reason: string): Promise<boolean> {
   console.log(`[AutoUpdater] Checking for updates (${reason})...`);
 
   try {
+    if (USE_WEBSITE_UPDATE_METADATA) {
+      return await checkWebsiteUpdateMetadata();
+    }
+
     await autoUpdater.checkForUpdates();
     return true;
   } catch (error) {
@@ -5383,6 +5804,15 @@ async function downloadAvailableUpdate(): Promise<{ accepted: boolean; completed
   }
 
   updateDownloadInFlight = true;
+
+  if (USE_WEBSITE_UPDATE_METADATA) {
+    try {
+      return await downloadWebsiteUpdate();
+    } finally {
+      updateDownloadInFlight = false;
+    }
+  }
+
   autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
   setUpdateState(reduceUpdateStateOnDownloadStart(updateState));
 
@@ -5407,6 +5837,14 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
   updateInstallInFlight = true;
   stopAutoUpdaterTimers();
 
+  if (USE_WEBSITE_UPDATE_METADATA) {
+    try {
+      return await openWebsiteUpdateInstaller();
+    } finally {
+      updateInstallInFlight = false;
+    }
+  }
+
   try {
     autoUpdater.quitAndInstall(false, true);
     return { accepted: true, completed: false };
@@ -5430,6 +5868,24 @@ function setupAutoUpdater() {
     return;
   }
 
+  updaterConfigured = true;
+
+  if (USE_WEBSITE_UPDATE_METADATA) {
+    console.log(`[AutoUpdater] Using website update metadata: ${UPDATE_METADATA_URL}`);
+    stopAutoUpdaterTimers();
+    updateStartupTimer = setTimeout(() => {
+      updateStartupTimer = null;
+      void checkForUpdates('startup');
+    }, AUTO_UPDATE_STARTUP_DELAY_MS);
+    updateStartupTimer.unref?.();
+
+    updatePollTimer = setInterval(() => {
+      void checkForUpdates('poll');
+    }, AUTO_UPDATE_POLL_INTERVAL_MS);
+    updatePollTimer.unref?.();
+    return;
+  }
+
   if (process.env.AYATI_MOCK_UPDATE_URL) {
     autoUpdater.setFeedURL({
       provider: 'generic',
@@ -5437,7 +5893,6 @@ function setupAutoUpdater() {
     });
   }
 
-  updaterConfigured = true;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
@@ -5528,7 +5983,7 @@ function setupTray() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Show Ayati - Quran Desktop Companion',
+      label: `Show ${APP_DISPLAY_NAME}`,
       click: () => {
         petWindow?.show();
         petWindow?.focus();
@@ -5562,14 +6017,14 @@ function setupTray() {
         dialog.showMessageBox({
           type: 'info',
           title: 'Onboarding Reset',
-          message: 'Onboarding has been reset. Restart Ayati - Quran Desktop Companion to see the onboarding wizard.',
+          message: `Onboarding has been reset. Restart ${APP_DISPLAY_NAME} to see the onboarding wizard.`,
           buttons: ['OK'],
         });
       },
     },
     { type: 'separator' },
     {
-      label: 'Quit Ayati - Quran Desktop Companion',
+      label: `Quit ${APP_DISPLAY_NAME}`,
       click: () => {
         app.quit();
       },
@@ -5601,8 +6056,8 @@ if (shouldStartApp) {
   app.on('open-url', (event, url) => {
     event.preventDefault();
     if (!url.startsWith('ayati://oauth/callback')) return;
-    const targetWindow = assistantWindow && !assistantWindow.isDestroyed() ? assistantWindow : null;
-    targetWindow?.webContents.send('ayah-oauth-callback', url);
+    if (!url.includes('code=') && !url.includes('error=')) return;
+    deliverQuranOAuthCallback(url);
   });
 
   protocol.registerSchemesAsPrivileged([

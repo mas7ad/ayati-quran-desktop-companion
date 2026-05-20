@@ -86,6 +86,9 @@ contextBridge.exposeInMainWorld('ayati', {
   completeQuranOAuthCallback: (callbackUrl: string) => ipcRenderer.invoke('quran-auth-complete', callbackUrl),
   getQuranAuthStatus: () => ipcRenderer.invoke('quran-auth-status'),
   disconnectQuranAccount: () => ipcRenderer.invoke('quran-auth-disconnect'),
+  getKeychainConsentStatus: () => ipcRenderer.invoke('keychain-consent-status'),
+  acknowledgeKeychainConsent: () => ipcRenderer.invoke('keychain-consent-acknowledge'),
+  ensureKeychainConsent: () => ipcRenderer.invoke('keychain-consent-ensure'),
   captureAyahReflection: (theme?: AyahTheme) => ipcRenderer.invoke('ayah-capture-reflection', theme),
   getPendingAyahReflectionResult: () => ipcRenderer.invoke('ayah-pending-reflection-result'),
   saveAyahReflection: (reflectionId: string) => ipcRenderer.invoke('ayah-save-reflection', reflectionId),
@@ -123,6 +126,12 @@ contextBridge.exposeInMainWorld('ayati', {
   getPrayerTimes: () => ipcRenderer.invoke('prayer-times-get'),
   refreshPrayerTimes: () => ipcRenderer.invoke('prayer-times-refresh'),
   getTodos: () => ipcRenderer.invoke('todo-list'),
+  onTodosUpdated: (callback: (todos: TodoItem[]) => void) => {
+    ipcRenderer.on('todos-updated', (_event, todos) => callback(todos as TodoItem[]));
+  },
+  onReflectionsUpdated: (callback: () => void) => {
+    ipcRenderer.on('reflections-updated', () => callback());
+  },
   updateTodoSettings: (patch: Partial<TodoSettings>) => ipcRenderer.invoke('todo-settings-update', patch),
   createTodo: (input: CreateTodoInput) => ipcRenderer.invoke('todo-create', input),
   updateTodo: (todoId: string, patch: UpdateTodoInput) => ipcRenderer.invoke('todo-update', todoId, patch),
@@ -431,6 +440,12 @@ export interface QuranAuthStatus {
   error?: string;
 }
 
+export interface KeychainConsentStatus {
+  required: boolean;
+  acknowledged: boolean;
+  hasStoredSecrets: boolean;
+}
+
 export interface AyahLensSettings {
   translationId: number;
   mushafId: number;
@@ -693,6 +708,9 @@ export interface AyatiAPI {
   completeQuranOAuthCallback: (callbackUrl: string) => Promise<QuranAuthStatus>;
   getQuranAuthStatus: () => Promise<QuranAuthStatus>;
   disconnectQuranAccount: () => Promise<boolean>;
+  getKeychainConsentStatus: () => Promise<KeychainConsentStatus>;
+  acknowledgeKeychainConsent: () => Promise<boolean>;
+  ensureKeychainConsent: () => Promise<{ granted: boolean }>;
   captureAyahReflection: (theme?: AyahTheme) => Promise<AyahReflection>;
   getPendingAyahReflectionResult: () => Promise<PendingAyahReflectionResult | null>;
   saveAyahReflection: (reflectionId: string) => Promise<AyahReflection | null>;
@@ -730,6 +748,8 @@ export interface AyatiAPI {
   getPrayerTimes: () => Promise<PrayerTimesBundle | null>;
   refreshPrayerTimes: () => Promise<PrayerTimesBundle | null>;
   getTodos: () => Promise<TodoItem[]>;
+  onTodosUpdated: (callback: (todos: TodoItem[]) => void) => void;
+  onReflectionsUpdated: (callback: () => void) => void;
   updateTodoSettings: (patch: Partial<TodoSettings>) => Promise<TodoSettings>;
   createTodo: (input: CreateTodoInput) => Promise<TodoItem[]>;
   updateTodo: (todoId: string, patch: UpdateTodoInput) => Promise<TodoItem[]>;

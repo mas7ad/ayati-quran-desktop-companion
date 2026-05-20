@@ -12,7 +12,9 @@ function createMockAyati() {
   return {
     getSettings: vi.fn().mockResolvedValue({}),
     getAyahLensSettings: vi.fn().mockResolvedValue({
-      translationId: 20,
+      translationId: 131,
+      tafsirResourceId: 169,
+      tafsirResourceName: 'Tafsir Ibn Kathir',
       mushafId: 4,
       captureMode: 'fullScreen',
       saveScreenshots: false,
@@ -38,6 +40,13 @@ function createMockAyati() {
       { id: 20, name: 'Dr. Mustafa Khattab', languageName: 'english' },
     ]),
     getQuranAuthStatus: vi.fn().mockResolvedValue({ isConnected: false, scopes: [] }),
+    getKeychainConsentStatus: vi.fn().mockResolvedValue({
+      required: false,
+      acknowledged: true,
+      hasStoredSecrets: false,
+    }),
+    acknowledgeKeychainConsent: vi.fn().mockResolvedValue(true),
+    ensureKeychainConsent: vi.fn().mockResolvedValue({ granted: true }),
     getAyahReflectionHistory: vi.fn().mockResolvedValue([]),
     getChatHistory: vi.fn().mockResolvedValue([]),
     getClawbotStatus: vi.fn().mockResolvedValue({ connected: true, error: null, gatewayUrl: '' }),
@@ -206,10 +215,7 @@ function createMockAyati() {
     qulIsAvailable: vi.fn().mockResolvedValue(false),
     getQulFontPacks: vi.fn().mockResolvedValue({
       madani1421: true,
-      madaniV4Tajweed: true,
-      madaniTajweed: true,
       indoPakNastaleeq: true,
-      qpcNastaleeq: true,
     }),
     getQulRenderedVerse: vi.fn().mockResolvedValue(null),
   } satisfies Partial<Window['ayati']>;

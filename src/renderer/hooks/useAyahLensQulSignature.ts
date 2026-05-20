@@ -15,7 +15,7 @@ export function useAyahLensQulSignature(): string {
         const s = await window.ayati.getAyahLensSettings();
         if (!cancelled) {
           setSig(
-            `${s.qulMushafKey ?? ''}:${Boolean(s.qulTajweedEnabled)}:${Boolean(s.qulArabicEnabled)}`,
+            `${s.qulMushafKey ?? ''}:${Boolean(s.qulArabicEnabled)}`,
           );
         }
       } catch {

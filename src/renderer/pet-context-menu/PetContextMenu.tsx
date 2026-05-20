@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { Icon } from '@iconify/react';
+import { APP_DISPLAY_NAME } from '../../shared/app-branding';
 
 type MenuAction = 'chat' | 'settings' | 'workspace' | 'quit';
 
@@ -96,7 +97,7 @@ export const PetContextMenu: React.FC = () => {
           onClick={() => handleClick('quit')}
         >
           <Icon icon="solar:power-linear" width="16" height="16" />
-          <span>Quit Ayati - Quran Desktop Companion</span>
+          <span>Quit {APP_DISPLAY_NAME}</span>
         </button>
       </div>
     </div>

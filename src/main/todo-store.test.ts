@@ -4,7 +4,9 @@ import {
   createTodo,
   deleteTodo,
   getDueTodoReminder,
+  getStartOfLocalDay,
   listTodos,
+  purgeCompletedTodos,
   setTodoCompleted,
   updateTodo,
 } from './todo-store';
@@ -40,6 +42,26 @@ describe('todo store', () => {
   it('rejects invalid task titles', () => {
     expect(() => createTodo(createDefaultAyahLensState().todos, { title: '' }, NOW)).toThrow('Task title is required.');
     expect(() => createTodo(createDefaultAyahLensState().todos, { title: 'x'.repeat(121) }, NOW)).toThrow('Task title must be 120 characters or fewer.');
+  });
+
+  it('purges completed tasks from before local midnight', () => {
+    const todayMorning = new Date(2026, 4, 2, 10, 0, 0).getTime();
+    const yesterdayEvening = new Date(2026, 4, 1, 22, 0, 0).getTime();
+    const todayAfternoon = new Date(2026, 4, 2, 15, 0, 0).getTime();
+
+    let state = createDefaultAyahLensState().todos;
+    state = createTodo(state, { title: 'Active task' }, todayMorning);
+    state = createTodo(state, { title: 'Done yesterday' }, todayMorning);
+    state = createTodo(state, { title: 'Done today' }, todayMorning);
+    const yesterdayTaskId = state.items.find((item) => item.title === 'Done yesterday')?.id ?? '';
+    const todayTaskId = state.items.find((item) => item.title === 'Done today')?.id ?? '';
+    state = setTodoCompleted(state, yesterdayTaskId, true, yesterdayEvening);
+    state = setTodoCompleted(state, todayTaskId, true, todayAfternoon);
+
+    const purged = purgeCompletedTodos(state, todayMorning);
+    expect(purged.items).toHaveLength(2);
+    expect(purged.items.map((item) => item.title).sort()).toEqual(['Active task', 'Done today']);
+    expect(getStartOfLocalDay(todayMorning)).toBe(new Date(2026, 4, 2, 0, 0, 0).getTime());
   });
 
   it('finds due unreminded tasks and sorts active tasks before completed tasks', () => {

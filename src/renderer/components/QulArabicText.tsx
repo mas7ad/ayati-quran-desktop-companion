@@ -48,13 +48,14 @@ async function ensureFontLoaded(postScriptName: string, absolutePath: string): P
 
 function resolveDisplayMushafKey(mushafKey: string | undefined): string {
   if (!mushafKey || mushafKey === 'madaniTajweed') return DEFAULT_QUL_MUSHAF_KEY;
-  if (mushafKey === 'madani1405') return DEFAULT_QUL_MUSHAF_KEY;
+  if (mushafKey === 'madani1405' || mushafKey === 'madaniV4Tajweed') return DEFAULT_QUL_MUSHAF_KEY;
+  if (mushafKey === 'qpcNastaleeq') return 'indoPakNastaleeq';
   return mushafKey;
 }
 
 function fontPathSuggestsColrDarkPalette(fontAbsolutePath: string, postScriptName: string): boolean {
   const norm = fontAbsolutePath.replace(/\\/g, '/');
-  return norm.includes('MadaniV4Tajweed/') || postScriptName.includes('COLOR');
+  return postScriptName.includes('COLOR');
 }
 
 export interface QulArabicTextProps {
@@ -111,12 +112,11 @@ export function QulArabicText({
         if (cancelled || settings.qulArabicEnabled === false) return;
 
         const mushafKey = resolveDisplayMushafKey(settings.qulMushafKey);
-        const includeTajweed = Boolean(settings.qulTajweedEnabled);
 
         const payload = await api.getQulRenderedVerse({
           verseKey,
           mushafKey,
-          includeTajweed,
+          includeTajweed: false,
         });
         if (cancelled || !payload) return;
 

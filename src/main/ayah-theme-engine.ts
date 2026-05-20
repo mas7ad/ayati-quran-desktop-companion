@@ -1,3 +1,4 @@
+import { APP_DISPLAY_NAME } from '../shared/app-branding';
 import { CURATED_AYAH_CANDIDATES, FALLBACK_VERSE_KEY } from './ayah-fallbacks';
 import type { AyahTheme, RankedAyahCandidate, ScreenInsight } from './ayah-types';
 
@@ -63,7 +64,7 @@ export function rankAyahCandidates(
 ): RankedAyahCandidate[] {
   const fallback = CURATED_AYAH_CANDIDATES.find((candidate) => candidate.verseKey === FALLBACK_VERSE_KEY);
   if (!fallback) {
-    throw new Error('Ayati - Quran Desktop Companion fallback verse is not configured.');
+    throw new Error(`${APP_DISPLAY_NAME} fallback verse is not configured.`);
   }
 
   if (shouldUseFallback(insight)) {
@@ -73,7 +74,7 @@ export function rankAyahCandidates(
       score: Number.MAX_SAFE_INTEGER,
       reflection: fallback.reflection,
       whyThisVerse: insight.isSensitive
-        ? 'The screen may contain sensitive information, so Ayati - Quran Desktop Companion chose a general remembrance instead of inferring details.'
+        ? `The screen may contain sensitive information, so ${APP_DISPLAY_NAME} chose a general remembrance instead of inferring details.`
         : fallback.whyThisVerse,
       isFallback: true,
     }];

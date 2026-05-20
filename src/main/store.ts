@@ -62,6 +62,9 @@ interface StoreSchema {
     windowBorders: boolean;
     showPetModeOverlay: boolean;
   };
+  privacy: {
+    keychainSecretsAcknowledged: boolean;
+  };
   ayahLens: AyahLensState;
 }
 
@@ -110,6 +113,9 @@ export function createDefaultStoreSchema(): StoreSchema {
     dev: {
       windowBorders: false,
       showPetModeOverlay: false,
+    },
+    privacy: {
+      keychainSecretsAcknowledged: false,
     },
     ayahLens: createDefaultAyahLensState(),
   };

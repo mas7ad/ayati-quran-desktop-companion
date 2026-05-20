@@ -146,6 +146,12 @@ interface QuranAuthStatus {
   error?: string;
 }
 
+interface KeychainConsentStatus {
+  required: boolean;
+  acknowledged: boolean;
+  hasStoredSecrets: boolean;
+}
+
 interface AyahLensSettings {
   translationId: number;
   mushafId: number;
@@ -419,6 +425,9 @@ interface AyatiAPI {
   completeQuranOAuthCallback: (callbackUrl: string) => Promise<QuranAuthStatus>;
   getQuranAuthStatus: () => Promise<QuranAuthStatus>;
   disconnectQuranAccount: () => Promise<boolean>;
+  getKeychainConsentStatus: () => Promise<KeychainConsentStatus>;
+  acknowledgeKeychainConsent: () => Promise<boolean>;
+  ensureKeychainConsent: () => Promise<{ granted: boolean }>;
   captureAyahReflection: (theme?: AyahTheme) => Promise<AyahReflection>;
   getPendingAyahReflectionResult: () => Promise<PendingAyahReflectionResult | null>;
   saveAyahReflection: (reflectionId: string) => Promise<AyahReflection | null>;
@@ -453,6 +462,8 @@ interface AyatiAPI {
   getPrayerTimes: () => Promise<PrayerTimesBundle | null>;
   refreshPrayerTimes: () => Promise<PrayerTimesBundle | null>;
   getTodos: () => Promise<TodoItem[]>;
+  onTodosUpdated: (callback: (todos: TodoItem[]) => void) => void;
+  onReflectionsUpdated: (callback: () => void) => void;
   updateTodoSettings: (patch: Partial<TodoSettings>) => Promise<TodoSettings>;
   createTodo: (input: CreateTodoInput) => Promise<TodoItem[]>;
   updateTodo: (todoId: string, patch: UpdateTodoInput) => Promise<TodoItem[]>;
@@ -520,7 +531,7 @@ interface AyatiAPI {
   petClicked: () => void;
   showPetContextMenu: (x: number, y: number) => void;
   hidePetContextMenu: () => void;
-  petContextMenuAction: (action: 'chat' | 'settings' | 'workspace') => void;
+  petContextMenuAction: (action: 'chat' | 'settings' | 'workspace' | 'quit') => void;
   removeAllListeners: () => void;
   // Onboarding
   onboardingSkip: () => Promise<boolean>;

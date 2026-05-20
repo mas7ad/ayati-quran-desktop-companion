@@ -1,17 +1,10 @@
 /** Mushaf keys present in QUL `verse_scripts` (qul_rendering.sqlite). */
 export type QulVerseScriptMushafKey =
   | 'madani1421'
-  | 'madaniTajweed'
-  | 'madaniV4Tajweed'
-  | 'indoPakNastaleeq'
-  | 'qpcNastaleeq';
+  | 'indoPakNastaleeq';
 
-/** Keys accepted from UI / manifest for font lookup (superset includes fonts-only rows). */
-export type QulManifestMushafKey =
-  | QulVerseScriptMushafKey
-  | 'qpcHafs'
-  | 'meQuran'
-  | 'indoPakNaskh';
+/** Keys accepted from UI / manifest for font lookup. */
+export type QulManifestMushafKey = QulVerseScriptMushafKey;
 
 export type QuranRendererKind = 'pageGlyph' | 'unicodeFont';
 

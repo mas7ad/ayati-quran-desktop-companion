@@ -1,3 +1,4 @@
+import { APP_DISPLAY_NAME } from '../shared/app-branding';
 import type { ClawBotClient } from './clawbot-client';
 import type { AyahTheme, ScreenInsight } from './ayah-types';
 
@@ -17,7 +18,7 @@ const VALID_THEMES = new Set<AyahTheme>([
   'unclear',
 ]);
 
-const ANALYSIS_PROMPT = `Analyze this screenshot for Ayati - Quran Desktop Companion, a Quran-focused reflection companion.
+const ANALYSIS_PROMPT = `Analyze this screenshot for ${APP_DISPLAY_NAME}, a Quran-focused reflection companion.
 
 Return only compact JSON with this shape:
 {

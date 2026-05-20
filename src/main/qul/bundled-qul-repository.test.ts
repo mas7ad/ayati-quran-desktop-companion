@@ -21,19 +21,19 @@ describe('bundled QUL repository', () => {
     resetQulTestSingletons();
   });
 
-  it('loads Madani Tajweed verse text from the bundled sqlite', async () => {
+  it('loads Madani 1421 verse text from the bundled sqlite', async () => {
     const result = await getQulRenderedVerse(
       {
         surahId: 2,
         ayahNumber: 286,
-        mushafKey: 'madaniTajweed',
+        mushafKey: 'madani1421',
         includeTajweed: false,
       },
       undefined,
     );
     expect(result).not.toBeNull();
     expect(result!.displayText.length).toBeGreaterThan(10);
-    expect(result!.fontAbsolutePath).toMatch(/UthmanicHafs_V22\.ttf$/);
+    expect(result!.fontAbsolutePath).toMatch(/Madani1421\/v2-p\d+\.ttf$/);
   });
 
   it('does not expose Madani 1405 because this bundle does not include its page fonts', async () => {

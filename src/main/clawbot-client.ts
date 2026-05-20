@@ -35,7 +35,9 @@ export interface ClawBotClientUpdateOptions {
   model?: string;
 }
 
-const OPENROUTER_APP_TITLE = 'Ayati - Quran Desktop Companion';
+import { APP_FULL_NAME } from '../shared/app-branding';
+
+const OPENROUTER_APP_TITLE = APP_FULL_NAME;
 const ANTHROPIC_API_VERSION = '2023-06-01';
 const ANTHROPIC_DEFAULT_MAX_TOKENS = 1024;
 

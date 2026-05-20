@@ -320,9 +320,18 @@ export const PetChat: React.FC = () => {
       window.ayati.petChatReply('thinking');
       try {
         const savedReflection = await window.ayati.saveAyahReflection(message.reflectionId);
+        if (!savedReflection) {
+          setMessage({
+            id: crypto.randomUUID(),
+            text: 'Could not save this verse reminder. Try again from Reflections.',
+            quickReplies: ['Got it', 'Not now'],
+          });
+          window.ayati.petChatReply('curious');
+          return;
+        }
         setMessage({
           id: crypto.randomUUID(),
-          text: savedReflection?.syncState === 'synced'
+          text: savedReflection.syncState === 'synced'
             ? 'Saved this verse reminder to Quran Foundation bookmarks.'
             : 'Saved this verse reminder locally.',
           quickReplies: ['Got it', 'Not now'],

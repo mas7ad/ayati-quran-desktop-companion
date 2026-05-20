@@ -10,8 +10,8 @@ export function createDefaultAyahLensState(): AyahLensState {
     quranConfig: {
       clientId: '',
       encryptedClientSecret: null,
-      redirectUri: 'ayati://oauth/callback',
-      environment: 'prelive',
+      redirectUri: 'https://ayati-website.vercel.app/oauth/callback',
+      environment: 'production',
     },
     quranAuth: {
       encryptedAccessToken: null,
@@ -24,7 +24,7 @@ export function createDefaultAyahLensState(): AyahLensState {
       expiresAt: null,
     },
     preferences: {
-      translationId: 20,
+      translationId: 131,
       mushafId: 4,
       qulArabicEnabled: true,
       qulMushafKey: 'madani1421',
@@ -36,8 +36,8 @@ export function createDefaultAyahLensState(): AyahLensState {
       nudgeCooldownMinutes: 15,
       timedReminders: false,
       timedReminderMinutes: 15,
-      tafsirResourceId: null,
-      tafsirResourceName: null,
+      tafsirResourceId: 169,
+      tafsirResourceName: 'Tafsir Ibn Kathir',
       recitationId: null,
       reciterName: null,
     },
@@ -307,23 +307,52 @@ export function markReflectionPendingSync(
   };
 }
 
+export function listReflectionIdsNeedingBookmarkSync(state: AyahLensState): string[] {
+  const ids = new Set<string>();
+  for (const item of state.pendingSync) {
+    if (item.action === 'bookmark') {
+      ids.add(item.reflectionId);
+    }
+  }
+  for (const reflection of state.reflections) {
+    if (reflection.savedAt && !reflection.quranBookmarkId) {
+      ids.add(reflection.id);
+    }
+  }
+  return [...ids];
+}
+
+export function clearPendingSyncAction(
+  state: AyahLensState,
+  reflectionId: string,
+  action: 'bookmark' | 'note' | 'collection' | 'activity',
+): AyahLensState {
+  return {
+    ...state,
+    pendingSync: state.pendingSync.filter((item) => (
+      !(item.reflectionId === reflectionId && item.action === action)
+    )),
+  };
+}
+
 export function markReflectionSynced(
   state: AyahLensState,
   reflectionId: string,
   quranBookmarkId: string | null,
 ): AyahLensState {
-  return {
+  const nextSyncState: AyahReflection['syncState'] = quranBookmarkId ? 'synced' : 'local';
+  const withReflection: AyahLensState = {
     ...state,
-    reflections: state.reflections.map((reflection) => (
+    reflections: state.reflections.map((reflection): AyahReflection => (
       reflection.id === reflectionId
-        ? {
+        ? sanitizeReflection({
           ...reflection,
           savedAt: reflection.savedAt ?? Date.now(),
           quranBookmarkId: quranBookmarkId ?? reflection.quranBookmarkId,
-          syncState: quranBookmarkId ? 'synced' : 'local',
-        }
+          syncState: nextSyncState,
+        })
         : reflection
     )),
-    pendingSync: state.pendingSync.filter((item) => item.reflectionId !== reflectionId),
   };
+  return clearPendingSyncAction(withReflection, reflectionId, 'bookmark');
 }

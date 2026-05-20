@@ -9,37 +9,29 @@ import {
   normalizePetAppearanceId,
   type PetAppearanceId,
 } from '../../shared/pet-appearance';
+import { APP_DISPLAY_NAME, APP_FULL_NAME } from '../../shared/app-branding';
 import { getClientPomodoroRemainingMs } from '../../shared/pomodoro-client';
 import { getNextPrayer } from '../../shared/prayer-schedule';
 import { filterAvailableRecitationResources } from '../../shared/quran-reciter-preferences';
 import { getAtlasForAppearance, type PetClipId } from '../pet/pet-sprite-atlas';
 import { getTafsirParagraphs } from '../screenshot-question/AyahVerseCard';
+import { KeychainConsentModal } from '../components/KeychainConsentModal';
+import { KEYCHAIN_CONSENT_LEDE } from '../../shared/keychain-consent';
 
 type Tab = 'prayers' | 'todos' | 'focus' | 'reflections' | 'settings';
 type UpdateAction = 'check' | 'download' | 'install';
 
 const isDevEnvironment = import.meta.env.DEV;
-const QUL_SCRIPT_OPTIONS = [
-  { value: 'madani1421', label: 'Madani 1421 (page glyph)' },
-  { value: 'madaniV4Tajweed', label: 'Madani V4 Tajweed (glyph)' },
-  { value: 'indoPakNastaleeq', label: 'Indo-Pak Nastaleeq' },
-  { value: 'qpcNastaleeq', label: 'QPC Nastaleeq' },
+
+const QURAN_FONT_OPTIONS = [
+  { value: 'madani1421', label: 'Madani' },
+  { value: 'indoPakNastaleeq', label: 'Indo-Pak' },
 ] as const;
-const MANUAL_REFLECTION_OPTIONS: Array<{ value: AyahTheme; label: string }> = [
-  { value: 'unclear', label: 'General Remembrance' },
-  { value: 'stress', label: 'Stress' },
-  { value: 'focus', label: 'Focus' },
-  { value: 'gratitude', label: 'Gratitude' },
-  { value: 'patience', label: 'Patience' },
-  { value: 'study', label: 'Study' },
-  { value: 'planning', label: 'Planning' },
-  { value: 'work', label: 'Work' },
-  { value: 'distraction', label: 'Distraction' },
-  { value: 'conflict', label: 'Conflict' },
-  { value: 'beauty', label: 'Beauty' },
-  { value: 'excess', label: 'Moderation' },
-  { value: 'risk', label: 'Uncertainty' },
-];
+
+function resolveSettingsQulMushafKey(mushafKey: string | undefined): (typeof QURAN_FONT_OPTIONS)[number]['value'] {
+  if (mushafKey === 'indoPakNastaleeq' || mushafKey === 'qpcNastaleeq') return 'indoPakNastaleeq';
+  return 'madani1421';
+}
 
 function isQulFontPackMissing(
   packs: Record<string, boolean> | null | undefined,
@@ -183,8 +175,8 @@ function getUpdateStatusLabel(state: DesktopUpdateState | null): string {
 
 function getUpdateButtonLabel(state: DesktopUpdateState | null): string {
   const action = getUpdateAction(state);
-  if (action === 'download') return 'Download Update';
-  if (action === 'install') return 'Restart and Install';
+  if (action === 'download') return 'Download Installer';
+  if (action === 'install') return 'Open Installer';
   if (state?.status === 'checking') return 'Checking...';
   return 'Check for Updates';
 }
@@ -210,40 +202,34 @@ function getTitleBarUpdateButtonText(state: DesktopUpdateState | null): string {
       ? `Downloading ${Math.floor(state.downloadPercent)}%`
       : 'Downloading…';
   }
-  if (state.status === 'downloaded') return 'Restart to update';
+  if (state.status === 'downloaded') return 'Open installer';
   if (state.status === 'error' && state.canRetry) return 'Retry update';
   return 'Update';
 }
 
-function getReflectionBookmarkButtonLabel(reflection: AyahReflection): string {
-  if (reflection.syncState === 'synced') return 'Synced';
-  if (reflection.savedAt) return 'Sync Bookmark';
-  return 'Save Bookmark';
-}
-
 function catalogLanguageLabel(resource: { languageName?: string }): string {
   const raw = resource.languageName?.trim();
-  return raw && raw.length > 0 ? raw : 'Other';
+  if (!raw || raw.length === 0) return 'Other';
+  return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
 }
+
+const DEFAULT_TRANSLATION_LANGUAGE = 'English';
+const PREFERRED_TRANSLATION_ID = 131;
+const PREFERRED_TAFSIR_ID = 169;
 
 type QuranContentListResource = { id: number; name: string; languageName?: string };
 
 export const Assistant: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('prayers');
-  const [isLoading, setIsLoading] = useState(false);
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [ayahSettings, setAyahSettings] = useState<AyahLensSettings | null>(null);
   const [quranAuthStatus, setQuranAuthStatus] = useState<QuranAuthStatus>({ isConnected: false, scopes: [] });
   const [reflections, setReflections] = useState<AyahReflection[]>([]);
   const [collections, setCollections] = useState<AyahCollection[]>([]);
-  const [streakSummary, setStreakSummary] = useState<QuranStreakSummary | null>(null);
-  const [daySummary, setDaySummary] = useState<AyahDaySummary | null>(null);
   const [reflectionSearch, setReflectionSearch] = useState('');
   const [reflectionStatusFilter, setReflectionStatusFilter] = useState<'all' | 'saved' | 'pending'>('all');
   const [reflectionThemeFilter, setReflectionThemeFilter] = useState<'all' | AyahTheme>('all');
-  const [selectedReflectionTheme, setSelectedReflectionTheme] = useState<AyahTheme>('unclear');
   const [reflectionFeedbackFilter, setReflectionFeedbackFilter] = useState<'all' | 'relevant' | 'not_relevant'>('all');
-  const [reflectionActionsMenuId, setReflectionActionsMenuId] = useState<string | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [prayerSettings, setPrayerSettings] = useState<PrayerSettings | null>(null);
   const [prayerDay, setPrayerDay] = useState<PrayerDay | null>(null);
@@ -268,22 +254,48 @@ export const Assistant: React.FC = () => {
     () => Object.keys(getAtlasForAppearance(selectedPetAppearanceId).clips) as PetClipId[],
     [selectedPetAppearanceId],
   );
-  const [oauthCallbackUrl, setOauthCallbackUrl] = useState('');
   const [quranStatusMessage, setQuranStatusMessage] = useState('');
+  const [keychainConsentOpen, setKeychainConsentOpen] = useState(false);
+  const keychainConsentActionRef = useRef<(() => void | Promise<void>) | null>(null);
   const [qulFontPacks, setQulFontPacks] = useState<Record<string, boolean> | null>(null);
   const [recitationResources, setRecitationResources] = useState<QuranRecitationResource[]>([]);
   const [tafsirResources, setTafsirResources] = useState<QuranContentListResource[]>([]);
   const [translationResources, setTranslationResources] = useState<QuranContentListResource[]>([]);
-  const [translationLanguageFilter, setTranslationLanguageFilter] = useState<string>('all');
+  const [translationLanguageFilter, setTranslationLanguageFilter] = useState<string>(DEFAULT_TRANSLATION_LANGUAGE);
   const todoAddDropdownRef = useRef<HTMLDivElement>(null);
 
   const switchTab = useCallback((nextTab: Tab) => {
     setActiveTab(nextTab);
   }, []);
 
+  const requestKeychainConsent = useCallback(async (action: () => void | Promise<void>) => {
+    const status = await window.ayati.getKeychainConsentStatus();
+    if (!status.required || status.acknowledged) {
+      await action();
+      return;
+    }
+    keychainConsentActionRef.current = action;
+    setKeychainConsentOpen(true);
+  }, []);
+
+  const handleKeychainConsentContinue = useCallback(async () => {
+    await window.ayati.acknowledgeKeychainConsent();
+    setKeychainConsentOpen(false);
+    const action = keychainConsentActionRef.current;
+    keychainConsentActionRef.current = null;
+    if (action) {
+      await action();
+    }
+  }, []);
+
+  const handleKeychainConsentCancel = useCallback(() => {
+    keychainConsentActionRef.current = null;
+    setKeychainConsentOpen(false);
+  }, []);
+
   const ayahQulSettingsKey = useMemo(() => {
     if (!ayahSettings) return '';
-    return `${ayahSettings.qulMushafKey ?? ''}:${Boolean(ayahSettings.qulTajweedEnabled)}:${ayahSettings.qulArabicEnabled !== false}`;
+    return `${ayahSettings.qulMushafKey ?? ''}:${ayahSettings.qulArabicEnabled !== false}`;
   }, [ayahSettings]);
 
   const translationCatalogLanguages = useMemo(() => {
@@ -330,10 +342,13 @@ export const Assistant: React.FC = () => {
     void window.ayati.getAyahTafsirResources().then(setTafsirResources).catch(() => setTafsirResources([]));
     void window.ayati.getAyahTranslationResources().then(setTranslationResources).catch(() => setTranslationResources([]));
     window.ayati.getQuranAuthStatus().then(setQuranAuthStatus);
+    void window.ayati.getKeychainConsentStatus().then((status) => {
+      if (status.required && !status.acknowledged && status.hasStoredSecrets) {
+        setKeychainConsentOpen(true);
+      }
+    });
     window.ayati.getAyahReflectionHistory().then(setReflections);
     window.ayati.getAyahCollections?.().then(setCollections);
-    window.ayati.getQuranStreakSummary?.().then(setStreakSummary);
-    window.ayati.getAyahDaySummary?.().then(setDaySummary);
     window.ayati.getPrayerSettings?.().then((settings) => {
       setPrayerSettings(settings);
       setPrayerDraft(settings);
@@ -342,6 +357,7 @@ export const Assistant: React.FC = () => {
       applyPrayerTimesPayload(payload ?? null, setPrayerDay, setPrayerTomorrow);
     });
     window.ayati.getTodos?.().then(setTodos);
+    window.ayati.onTodosUpdated?.(setTodos);
     window.ayati.getPomodoroState?.().then(setPomodoroState);
     window.ayati.getUpdateState().then(setUpdateState);
 
@@ -375,6 +391,11 @@ export const Assistant: React.FC = () => {
 
     window.ayati.onSwitchToReflections?.(() => {
       switchTab('reflections');
+      void window.ayati.getAyahReflectionHistory().then(setReflections);
+    });
+
+    window.ayati.onReflectionsUpdated?.(() => {
+      void window.ayati.getAyahReflectionHistory().then(setReflections);
     });
 
     return () => {
@@ -395,9 +416,20 @@ export const Assistant: React.FC = () => {
   useEffect(() => {
     if (translationsForSettingsPicker.length === 0 || !ayahSettings) return;
     if (!translationsForSettingsPicker.some((t) => t.id === ayahSettings.translationId)) {
-      void updateAyahSetting('translationId', translationsForSettingsPicker[0].id);
+      const preferred = translationsForSettingsPicker.find((t) => t.id === PREFERRED_TRANSLATION_ID)
+        ?? translationsForSettingsPicker[0];
+      void updateAyahSetting('translationId', preferred.id);
     }
   }, [translationsForSettingsPicker, ayahSettings, updateAyahSetting]);
+
+  useEffect(() => {
+    if (tafsirResources.length === 0 || !ayahSettings) return;
+    const currentId = ayahSettings.tafsirResourceId;
+    if (currentId && tafsirResources.some((r) => r.id === currentId)) return;
+    const preferred = tafsirResources.find((r) => r.id === PREFERRED_TAFSIR_ID) ?? tafsirResources[0];
+    void updateAyahSetting('tafsirResourceId', preferred.id);
+    if (preferred.name) void updateAyahSetting('tafsirResourceName', preferred.name);
+  }, [tafsirResources, ayahSettings, updateAyahSetting]);
 
   const updateReminderListenReciter = useCallback(async (rawRecitationId: string) => {
     const recitationId = Number(rawRecitationId);
@@ -445,7 +477,7 @@ export const Assistant: React.FC = () => {
       }
 
       if (action === 'install') {
-        const confirmed = confirm('Restart Ayati - Quran Desktop Companion now to install the downloaded update?');
+        const confirmed = confirm('Open the downloaded Ayati installer now? Ayati will quit so you can complete the update.');
         if (!confirmed) return;
         const result = await window.ayati.installUpdate();
         setUpdateState(result.state);
@@ -466,39 +498,8 @@ export const Assistant: React.FC = () => {
   }, [updateState]);
 
   const refreshReflections = useCallback(async () => {
-    const [nextReflections, nextSummary, nextStreak] = await Promise.all([
-      window.ayati.getAyahReflectionHistory(),
-      window.ayati.getAyahDaySummary(),
-      window.ayati.getQuranStreakSummary(),
-    ]);
-    setReflections(nextReflections);
-    setDaySummary(nextSummary);
-    setStreakSummary(nextStreak);
+    setReflections(await window.ayati.getAyahReflectionHistory());
   }, []);
-
-  const createManualReflection = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const nextReflection = await window.ayati.captureAyahReflection(selectedReflectionTheme);
-      await refreshReflections();
-      switchTab('reflections');
-      setQuranStatusMessage(`New reflection: ${nextReflection.surahName} ${nextReflection.verseKey}`);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [refreshReflections, selectedReflectionTheme, switchTab]);
-
-  const saveReflectionFromPanel = useCallback(async (reflectionId: string) => {
-    const savedReflection = await window.ayati.saveAyahReflection(reflectionId);
-    if (savedReflection) {
-      await refreshReflections();
-      setQuranStatusMessage(
-        savedReflection.syncState === 'synced'
-          ? 'Bookmark synced with Quran Foundation.'
-          : 'Reflection saved locally. Sign in to sync bookmarks.',
-      );
-    }
-  }, [refreshReflections]);
 
   const loadReflectionTafsir = useCallback(async (reflectionId: string) => {
     const resourceId = typeof ayahSettings?.tafsirResourceId === 'number' && ayahSettings.tafsirResourceId > 0
@@ -513,53 +514,11 @@ export const Assistant: React.FC = () => {
     await refreshReflections();
   }, [refreshReflections]);
 
-  const saveReflectionNoteFromPanel = useCallback(async (reflectionId: string) => {
-    const body = noteDrafts[reflectionId]?.trim() ?? '';
-    if (body.length < 6) return;
-    await window.ayati.saveAyahReflectionNote(reflectionId, body);
-    await refreshReflections();
-    setQuranStatusMessage('Reflection note saved.');
-  }, [noteDrafts, refreshReflections]);
-
   const addReflectionToCollectionFromPanel = useCallback(async (reflectionId: string, collectionId: string) => {
     await window.ayati.addReflectionToCollection(reflectionId, collectionId);
     await refreshReflections();
     setQuranStatusMessage('Collection updated.');
   }, [refreshReflections]);
-
-  const createCollectionFromPanel = useCallback(async () => {
-    const collection = await window.ayati.createAyahCollection('Ayati Reflections');
-    setCollections(await window.ayati.getAyahCollections());
-    setQuranStatusMessage(`Collection ready: ${collection.name}`);
-  }, []);
-
-  const setReflectionFeedbackFromPanel = useCallback(async (
-    reflectionId: string,
-    value: 'relevant' | 'not_relevant',
-  ) => {
-    await window.ayati.setReflectionFeedback(reflectionId, value);
-    await refreshReflections();
-  }, [refreshReflections]);
-
-  const copyShareCardFromPanel = useCallback(async (reflectionId: string) => {
-    const copied = await window.ayati.copyReflectionShareCard(reflectionId);
-    setQuranStatusMessage(copied ? 'Share card copied.' : 'Could not copy this reflection.');
-  }, []);
-
-  useEffect(() => {
-    if (activeTab !== 'reflections') setReflectionActionsMenuId(null);
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (!reflectionActionsMenuId) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest?.('[data-reflection-actions-menu-root]')) return;
-      setReflectionActionsMenuId(null);
-    };
-    document.addEventListener('pointerdown', onPointerDown, true);
-    return () => document.removeEventListener('pointerdown', onPointerDown, true);
-  }, [reflectionActionsMenuId]);
 
   const savePrayerSettings = useCallback(async () => {
     if (!prayerDraft) return;
@@ -593,11 +552,6 @@ export const Assistant: React.FC = () => {
       const bundle = await window.ayati.refreshPrayerTimes().catch(() => null);
       applyPrayerTimesPayload(bundle, setPrayerDay, setPrayerTomorrow);
     })();
-  }, []);
-
-  const refreshPrayerPanel = useCallback(async () => {
-    const bundle = await window.ayati.refreshPrayerTimes();
-    applyPrayerTimesPayload(bundle, setPrayerDay, setPrayerTomorrow);
   }, []);
 
   const createTodoFromPanel = useCallback(async () => {
@@ -653,9 +607,6 @@ export const Assistant: React.FC = () => {
     setTodos(await window.ayati.deleteTodo(todoId));
   }, []);
 
-  const updateTodoSettingsFromSettings = useCallback(async (patch: Partial<TodoSettings>) => {
-    setTodos(await window.ayati.updateTodoSettings(patch));
-  }, []);
 
   const updatePomodoroSettingsFromPanel = useCallback(async (patch: Partial<PomodoroSettings>) => {
     setPomodoroState(await window.ayati.updatePomodoroSettings(patch));
@@ -674,23 +625,22 @@ export const Assistant: React.FC = () => {
     }));
   }, [pomodoroState?.settings.focusMinutes, pomodoroState?.settings.longBreakMinutes, pomodoroState?.settings.shortBreakMinutes, selectedFocusTodoId]);
 
-  const startQuranSignIn = useCallback(async () => {
+  const runQuranSignIn = useCallback(async () => {
     try {
       const { authorizeUrl } = await window.ayati.startQuranOAuth();
       window.ayati.openExternal(authorizeUrl);
-      setQuranStatusMessage('Complete sign-in in your browser, then paste the callback URL if the app does not finish automatically.');
-    } catch {
-      setQuranStatusMessage('Quran Foundation client ID is not configured.');
+      setQuranStatusMessage('Complete sign-in in your browser, then open Ayati from the callback page.');
+    } catch (error) {
+      const message = error instanceof Error && error.message.trim().length > 0
+        ? error.message
+        : 'Quran Foundation client ID is not configured.';
+      setQuranStatusMessage(message);
     }
   }, []);
 
-  const completeQuranSignIn = useCallback(async () => {
-    if (!oauthCallbackUrl.trim()) return;
-    const status = await window.ayati.completeQuranOAuthCallback(oauthCallbackUrl.trim());
-    setQuranAuthStatus(status);
-    setOauthCallbackUrl('');
-    setQuranStatusMessage(status.error ?? 'Quran Foundation account connected.');
-  }, [oauthCallbackUrl]);
+  const startQuranSignIn = useCallback(() => {
+    void requestKeychainConsent(runQuranSignIn);
+  }, [requestKeychainConsent, runQuranSignIn]);
 
   const disconnectQuran = useCallback(async () => {
     await window.ayati.disconnectQuranAccount();
@@ -787,8 +737,8 @@ export const Assistant: React.FC = () => {
       {/* Header */}
       <div className="h-12 border-b border-white/5 flex items-center justify-between gap-2 px-4 select-none shrink-0 bg-[#0f0f0f] drag-region">
         <div className="flex items-center min-w-0 flex-1">
-          <span className="min-w-0 truncate text-sm font-medium tracking-tight text-white" title="Ayati - Quran Desktop Companion">
-            Ayati - Quran Desktop Companion
+          <span className="min-w-0 truncate text-sm font-medium tracking-tight text-white" title={APP_FULL_NAME}>
+            {APP_DISPLAY_NAME}
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0 no-drag">
@@ -878,22 +828,6 @@ export const Assistant: React.FC = () => {
 
       {activeTab === 'prayers' && (
         <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-white">Prayer Times</h2>
-              <p className="text-xs text-neutral-500 mt-1">
-                {prayerDay ? `${prayerDay.city}, ${prayerDay.country}` : 'Set your city and country to load today\'s prayer schedule.'}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={refreshPrayerPanel}
-              className="px-3 py-2 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-            >
-              Refresh
-            </button>
-          </div>
-
           {!currentPrayerDraft.hasSavedSettings && (
             <section className="border border-white/10 rounded-md p-3 bg-white/[0.03]">
               <div className="grid grid-cols-2 gap-3">
@@ -1025,10 +959,6 @@ export const Assistant: React.FC = () => {
 
       {activeTab === 'todos' && (
         <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
-          <div>
-            <h2 className="text-sm font-semibold text-white">To Do</h2>
-            <p className="text-xs text-neutral-500 mt-1">Local tasks with optional pet reminders.</p>
-          </div>
           <div className="relative" ref={todoAddDropdownRef}>
             {!todoAddDropdownOpen ? (
               <button
@@ -1130,10 +1060,6 @@ export const Assistant: React.FC = () => {
 
       {activeTab === 'focus' && (
         <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
-          <div>
-            <h2 className="text-sm font-semibold text-white">Focus</h2>
-            <p className="text-xs text-neutral-500 mt-1">Pomodoro sessions with optional task links.</p>
-          </div>
           <section className="text-center border border-white/10 rounded-md p-5 bg-white/[0.03]">
             <p className="text-xs text-neutral-500">{pomodoroState?.activeSession?.kind ?? 'focus'}</p>
             <h3 className="text-5xl font-semibold tabular-nums text-white mt-2">{pomodoroDisplay}</h3>
@@ -1182,39 +1108,6 @@ export const Assistant: React.FC = () => {
       {/* CONTENT: Reflections */}
       {activeTab === 'reflections' && (
         <div className="flex-1 flex flex-col overflow-y-auto p-4 scrollbar-hide">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
-            <div>
-              <h2 className="text-sm font-semibold text-white">Recent Reflections</h2>
-              <p className="text-xs text-neutral-500 mt-1">Choose what you need right now and save the ayahs that resonate.</p>
-            </div>
-            <div className="flex flex-wrap gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={createCollectionFromPanel}
-                className="px-3 py-2 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-              >
-                Create Collection
-              </button>
-              <select
-                aria-label="Reflection theme"
-                value={selectedReflectionTheme}
-                onChange={(event) => setSelectedReflectionTheme(event.target.value as AyahTheme)}
-                className="bg-[#0a0a0a] border border-white/10 rounded-md px-3 py-2 text-xs text-neutral-300"
-              >
-                {MANUAL_REFLECTION_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={createManualReflection}
-                disabled={isLoading}
-                className="px-3 py-2 bg-[#67E0A3] text-[#07120f] rounded-md text-xs font-semibold disabled:opacity-60"
-              >
-                New Reflection
-              </button>
-            </div>
-          </div>
 
           {quranStatusMessage && (
             <div className="mb-3 text-xs text-[#67E0A3] bg-[#67E0A3]/10 border border-[#67E0A3]/25 rounded-md px-3 py-2">
@@ -1222,33 +1115,6 @@ export const Assistant: React.FC = () => {
             </div>
           )}
 
-          <section className="mb-4 grid gap-3 border border-white/10 rounded-md p-3 bg-white/[0.03]">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-xs font-semibold text-white">Day Recap</h3>
-                <p className="text-[11px] text-neutral-500">
-                  {daySummary
-                    ? `${daySummary.reflectionCount} reflections, ${daySummary.savedCount} saved, ${daySummary.noteCount} notes today`
-                    : 'No day summary loaded yet.'}
-                </p>
-              </div>
-              <div className="text-right text-[11px] text-neutral-400">
-                <p>Quran streak: {streakSummary?.currentDays ?? 0} days</p>
-                <p className={streakSummary?.syncState === 'synced' ? 'text-[#67E0A3]' : 'text-neutral-500'}>
-                  {streakSummary?.syncState === 'synced' ? 'Today recorded' : 'Pending Quran Foundation'}
-                </p>
-              </div>
-            </div>
-            {daySummary && daySummary.themes.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {daySummary.themes.map((theme) => (
-                  <span key={theme.id} className="text-[11px] px-2 py-1 rounded-md border border-white/10 text-neutral-300">
-                    {theme.id} {theme.count}
-                  </span>
-                ))}
-              </div>
-            )}
-          </section>
 
           <div className="mb-4 grid gap-2">
             <input
@@ -1390,7 +1256,7 @@ export const Assistant: React.FC = () => {
                         onClick={() => loadReflectionTafsir(reflection.id)}
                         className="shrink-0 px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
                       >
-                        Load Tafsir
+                        Show Tafsir
                       </button>
                     )}
                     <button
@@ -1398,105 +1264,18 @@ export const Assistant: React.FC = () => {
                       onClick={() => loadReflectionAudio(reflection.id)}
                       className="shrink-0 px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
                     >
-                      Load Recitation
+                      Play Recitation
                     </button>
                     <button
                       type="button"
                       onClick={async () => {
-                        setReflectionActionsMenuId(null);
                         await window.ayati.deleteAyahReflection(reflection.id);
                         await refreshReflections();
                       }}
-                      className="shrink-0 px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-500 hover:text-neutral-300"
+                      className="shrink-0 px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-500 hover:text-red-400 hover:border-red-500/50"
                     >
                       Delete
                     </button>
-                    <div className="relative shrink-0" data-reflection-actions-menu-root>
-                      <button
-                        type="button"
-                        aria-haspopup="menu"
-                        aria-expanded={reflectionActionsMenuId === reflection.id}
-                        aria-label="More reflection actions"
-                        onClick={() => setReflectionActionsMenuId((openId) => (openId === reflection.id ? null : reflection.id))}
-                        className="px-2 py-1.5 border border-white/10 rounded-md text-neutral-300 hover:border-[#67E0A3]/70 flex items-center justify-center"
-                      >
-                        <Icon icon="mdi:dots-horizontal" className="w-5 h-5" aria-hidden />
-                      </button>
-                      {reflectionActionsMenuId === reflection.id && (
-                        <div
-                          role="menu"
-                          className="absolute right-0 top-full z-30 mt-1 min-w-[12rem] py-1 rounded-md border border-white/10 bg-[#0a0a0a] shadow-lg"
-                        >
-                          <button
-                            type="button"
-                            role="menuitem"
-                            disabled={reflection.syncState === 'synced'}
-                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5 disabled:opacity-40 disabled:pointer-events-none disabled:hover:bg-transparent"
-                            onClick={() => {
-                              void (async () => {
-                                await saveReflectionFromPanel(reflection.id);
-                                setReflectionActionsMenuId(null);
-                              })();
-                            }}
-                          >
-                            {getReflectionBookmarkButtonLabel(reflection)}
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            disabled={(noteDrafts[reflection.id] ?? reflection.note?.body ?? '').trim().length < 6}
-                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5 disabled:opacity-40 disabled:pointer-events-none disabled:hover:bg-transparent"
-                            onClick={() => {
-                              void (async () => {
-                                await saveReflectionNoteFromPanel(reflection.id);
-                                setReflectionActionsMenuId(null);
-                              })();
-                            }}
-                          >
-                            Save Note
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5"
-                            onClick={() => {
-                              void (async () => {
-                                await copyShareCardFromPanel(reflection.id);
-                                setReflectionActionsMenuId(null);
-                              })();
-                            }}
-                          >
-                            Copy Share Card
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5"
-                            onClick={() => {
-                              void (async () => {
-                                await setReflectionFeedbackFromPanel(reflection.id, 'relevant');
-                                setReflectionActionsMenuId(null);
-                              })();
-                            }}
-                          >
-                            Mark relevant
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className="w-full text-left px-3 py-2 text-xs text-neutral-200 hover:bg-white/5"
-                            onClick={() => {
-                              void (async () => {
-                                await setReflectionFeedbackFromPanel(reflection.id, 'not_relevant');
-                                setReflectionActionsMenuId(null);
-                              })();
-                            }}
-                          >
-                            Mark not relevant
-                          </button>
-                        </div>
-                      )}
-                    </div>
                   </div>
                 </article>
               ))}
@@ -1555,28 +1334,18 @@ export const Assistant: React.FC = () => {
                 </div>
               </label>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="grid grid-cols-2 gap-4">
                 <label className="block">
                   <span className="block text-xs font-medium text-neutral-300 mb-2">Timer Minutes</span>
                   <input
                     type="number"
                     min={1}
                     max={1440}
-                    list="timed-reminder-options"
                     value={ayahSettings?.timedReminderMinutes ?? 15}
                     onChange={(event) => updateAyahSetting('timedReminderMinutes', Number(event.target.value))}
                     className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   />
-                  <datalist id="timed-reminder-options">
-                    <option value="5" />
-                    <option value="10" />
-                    <option value="15" />
-                    <option value="20" />
-                    <option value="60" />
-                  </datalist>
-                  <span className="mt-1 block text-[11px] text-neutral-500">
-                    Use 5, 10, 15, 20, 60, or any minute interval.
-                  </span>
                 </label>
                 <label className="block">
                   <span className="block text-xs font-medium text-neutral-300 mb-2">Cooldown Minutes</span>
@@ -1589,6 +1358,10 @@ export const Assistant: React.FC = () => {
                     className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
                   />
                 </label>
+                </div>
+                <span className="mt-1 block text-[11px] text-neutral-500">
+                  Enter any minute interval from 1 to 1440.
+                </span>
               </div>
               <label className="block">
                 <span className="block text-xs font-medium text-neutral-300 mb-2">Reminder Listen Reciter</span>
@@ -1684,121 +1457,11 @@ export const Assistant: React.FC = () => {
                       <option key={method.id} value={method.id}>{method.label}</option>
                     ))}
                   </select>
-                  <p className="text-[11px] text-neutral-500 mt-1.5 leading-snug" role="note">{PRAYER_CALCULATION_METHOD_UK_NOTE}</p>
                 </label>
               </div>
             </div>
           </SettingsSection>
 
-          <SettingsSection title="To Do">
-            <label className="flex items-center justify-between cursor-pointer group">
-              <div className="flex flex-col pr-4">
-                <span className="text-sm font-medium text-neutral-300">Pet Task Reminders</span>
-                <span className="text-[11px] text-neutral-500 mt-0.5">Send pet reminders for due local tasks</span>
-              </div>
-              <div className="relative">
-                <input
-                  type="checkbox"
-                  className="sr-only peer"
-                  checked={todos?.settings?.petRemindersEnabled ?? true}
-                  onChange={(event) => updateTodoSettingsFromSettings({ petRemindersEnabled: event.target.checked })}
-                />
-                <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
-                <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
-              </div>
-            </label>
-          </SettingsSection>
-
-          <SettingsSection title="Focus">
-            <div className="space-y-4">
-              <label className="flex items-center justify-between cursor-pointer group">
-                <div className="flex flex-col pr-4">
-                  <span className="text-sm font-medium text-neutral-300">Pet Focus Reminders</span>
-                  <span className="text-[11px] text-neutral-500 mt-0.5">Announce completed focus and break sessions</span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={pomodoroState?.settings.petRemindersEnabled ?? true}
-                    onChange={(event) => updatePomodoroSettingsFromPanel({ petRemindersEnabled: event.target.checked })}
-                  />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
-                  <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
-                </div>
-              </label>
-              <div className="grid grid-cols-3 gap-4">
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Focus</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={240}
-                    value={pomodoroState?.settings.focusMinutes ?? 25}
-                    onChange={(event) => updatePomodoroSettingsFromPanel({ focusMinutes: Number(event.target.value) })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
-                  />
-                </label>
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Short Break</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={120}
-                    value={pomodoroState?.settings.shortBreakMinutes ?? 5}
-                    onChange={(event) => updatePomodoroSettingsFromPanel({ shortBreakMinutes: Number(event.target.value) })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
-                  />
-                </label>
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Long Break</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={120}
-                    value={pomodoroState?.settings.longBreakMinutes ?? 15}
-                    onChange={(event) => updatePomodoroSettingsFromPanel({ longBreakMinutes: Number(event.target.value) })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
-                  />
-                </label>
-              </div>
-            </div>
-          </SettingsSection>
-
-          <SettingsSection title="Watching">
-            <div className="space-y-4">
-              <label className="flex items-center justify-between cursor-pointer group">
-                <span className="text-sm font-medium text-neutral-300">
-                  Watch active app changes
-                </span>
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={(settings.watch as { activeApp: boolean })?.activeApp ?? true}
-                    onChange={(e) => updateSetting('watch.activeApp', e.target.checked)}
-                  />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
-                  <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
-                </div>
-              </label>
-              <label className="flex items-center justify-between cursor-pointer group">
-                <span className="text-sm font-medium text-neutral-300">
-                  Include window titles
-                </span>
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={(settings.watch as { sendWindowTitles: boolean })?.sendWindowTitles ?? false}
-                    onChange={(e) => updateSetting('watch.sendWindowTitles', e.target.checked)}
-                  />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
-                  <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
-                </div>
-              </label>
-            </div>
-          </SettingsSection>
 
           <SettingsSection title="Companion Behavior">
             <div className="space-y-4">
@@ -1828,7 +1491,7 @@ export const Assistant: React.FC = () => {
                     Transparent while asleep
                   </span>
                   <span className="text-[11px] text-neutral-500 mt-0.5">
-                    Fade Ayati - Quran Desktop Companion when in doze/sleep state
+                    Fade {APP_DISPLAY_NAME} when in doze/sleep state
                   </span>
                 </div>
                 <div className="relative shrink-0">
@@ -1884,8 +1547,11 @@ export const Assistant: React.FC = () => {
             </div>
           </SettingsSection>
 
-          <SettingsSection title="Quran Foundation">
+          <SettingsSection title="Quran">
             <div className="space-y-4">
+              <p className="text-[11px] text-neutral-500 leading-relaxed">
+                {KEYCHAIN_CONSENT_LEDE} On macOS, Ayati stores your Quran Foundation sign-in in Keychain after you approve access.
+              </p>
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium text-neutral-300">
@@ -1912,38 +1578,35 @@ export const Assistant: React.FC = () => {
                 )}
               </div>
 
-              <div className="space-y-2">
-                <label className="block text-xs font-medium text-neutral-300">
-                  Manual callback URL
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={oauthCallbackUrl}
-                    onChange={(event) => setOauthCallbackUrl(event.target.value)}
-                    placeholder="ayati://oauth/callback?code=..."
-                    className="min-w-0 flex-1 bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
-                  />
-                  <button
-                    onClick={completeQuranSignIn}
-                    className="px-3 py-2 bg-white/5 border border-white/10 rounded-md hover:bg-white/10 text-xs font-medium text-neutral-300"
-                  >
-                    Complete
-                  </button>
-                </div>
-              </div>
+              <label className="block">
+                <span className="block text-xs font-medium text-neutral-300 mb-2">Quran Font</span>
+                <select
+                  aria-label="Quran Font"
+                  value={resolveSettingsQulMushafKey(ayahSettings?.qulMushafKey)}
+                  onChange={(event) => void updateAyahSetting('qulMushafKey', event.target.value)}
+                  className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                >
+                  {QURAN_FONT_OPTIONS.map((opt) => (
+                    <option
+                      key={opt.value}
+                      value={opt.value}
+                      disabled={isQulFontPackMissing(qulFontPacks, opt.value)}
+                    >
+                      {opt.label}
+                      {isQulFontPackMissing(qulFontPacks, opt.value) ? ' — fonts missing in bundle' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
               <div className="space-y-4">
                 <div>
                   <h4 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-1">
                     Translation &amp; tafsir
                   </h4>
-                  <p className="text-[10px] text-neutral-500 mb-3">
-                    Quran.com catalog. Applies to new captures and verse loads; existing reflection cards keep stored text until refreshed.
-                  </p>
-                  <div className="space-y-4">
+                  <div className="space-y-4 mt-3">
                     <label className="block">
-                      <span className="block text-xs font-medium text-neutral-300 mb-2">Translation language</span>
+                      <span className="block text-xs font-medium text-neutral-300 mb-2">Translation Language</span>
                       <select
                         aria-label="Filter translations by language"
                         value={translationLanguageFilter}
@@ -1981,17 +1644,18 @@ export const Assistant: React.FC = () => {
                       <span className="block text-xs font-medium text-neutral-300 mb-2">Tafsir edition</span>
                       <select
                         aria-label="Default tafsir resource"
-                        value={
-                          typeof ayahSettings?.tafsirResourceId === 'number'
+                        value={String(
+                          (typeof ayahSettings?.tafsirResourceId === 'number'
                             && tafsirResources.some((r) => r.id === ayahSettings.tafsirResourceId)
-                            ? String(ayahSettings.tafsirResourceId)
-                            : ''
-                        }
+                            ? ayahSettings.tafsirResourceId
+                            : tafsirResources.find((r) => r.id === PREFERRED_TAFSIR_ID)?.id
+                              ?? tafsirResources[0]?.id
+                              ?? ''),
+                        )}
                         onChange={(event) => void handleSettingsTafsirSelectChange(event)}
                         disabled={tafsirResources.length === 0}
                         className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all disabled:opacity-50"
                       >
-                        <option value="">Auto (pick on first load)</option>
                         {tafsirResources.map((r) => (
                           <option key={r.id} value={r.id}>
                             {r.name}{r.languageName ? ` (${r.languageName})` : ''}
@@ -2001,64 +1665,8 @@ export const Assistant: React.FC = () => {
                     </label>
                   </div>
                 </div>
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Mushaf ID</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={ayahSettings?.mushafId ?? 4}
-                    onChange={(event) => updateAyahSetting('mushafId', Number(event.target.value))}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
-                  />
-                </label>
               </div>
 
-              <div className="space-y-4 rounded-lg border border-white/10 bg-[#0a0a0a]/80 px-4 py-4">
-                <label className="flex items-center justify-between gap-3 cursor-pointer">
-                  <span className="text-xs font-medium text-neutral-300">QUL Arabic script</span>
-                  <input
-                    type="checkbox"
-                    className="rounded border-white/20 bg-black/40 text-[#67E0A3] focus:ring-[#67E0A3]"
-                    checked={ayahSettings?.qulArabicEnabled !== false}
-                    onChange={(e) => updateAyahSetting('qulArabicEnabled', e.target.checked)}
-                  />
-                </label>
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">QUL mushaf track</span>
-                  <select
-                    value={ayahSettings?.qulMushafKey === 'madaniTajweed' || ayahSettings?.qulMushafKey === 'madani1405' ? 'madani1421' : ayahSettings?.qulMushafKey ?? 'madani1421'}
-                    onChange={(e) => updateAyahSetting('qulMushafKey', e.target.value)}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
-                  >
-                    {QUL_SCRIPT_OPTIONS.map((opt) => (
-                      <option
-                        key={opt.value}
-                        value={opt.value}
-                        disabled={isQulFontPackMissing(qulFontPacks, opt.value)}
-                      >
-                        {opt.label}
-                        {isQulFontPackMissing(qulFontPacks, opt.value) ? ' — fonts missing in bundle' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex items-center justify-between gap-3 cursor-pointer">
-                  <span className="text-xs font-medium text-neutral-300">Tajweed colors (QUL)</span>
-                  <input
-                    type="checkbox"
-                    className="rounded border-white/20 bg-black/40 text-[#67E0A3] focus:ring-[#67E0A3]"
-                    checked={Boolean(ayahSettings?.qulTajweedEnabled)}
-                    onChange={(e) => updateAyahSetting('qulTajweedEnabled', e.target.checked)}
-                  />
-                </label>
-                <p className="text-[10px] text-neutral-500 leading-relaxed">
-                  Bundled QUL database + fonts (QuranScroll-style pipeline). Tajweed colors are tuned for Ayati&apos;s dark panels. Disable QUL to use Quran Foundation Arabic only.
-                </p>
-              </div>
-
-              <p className="text-[11px] leading-relaxed text-neutral-500">
-                Translation text from Quran Foundation is displayed as returned and is not re-translated.
-              </p>
               {quranStatusMessage && <p className="text-[11px] text-[#67E0A3]">{quranStatusMessage}</p>}
             </div>
           </SettingsSection>
@@ -2094,7 +1702,7 @@ export const Assistant: React.FC = () => {
                       Show companion mode overlay
                     </span>
                     <span className="text-[11px] text-neutral-500 mt-0.5">
-                      Display current mode text above Ayati - Quran Desktop Companion
+                      Display current mode text above {APP_DISPLAY_NAME}
                     </span>
                   </div>
                   <div className="relative shrink-0">
@@ -2116,7 +1724,7 @@ export const Assistant: React.FC = () => {
                       Force companion state
                     </span>
                     <p className="text-[11px] text-neutral-500 mt-0.5">
-                      Instantly set Ayati - Quran Desktop Companion&apos;s current mood state
+                      Instantly set {APP_DISPLAY_NAME}&apos;s current mood state
                     </p>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
@@ -2199,7 +1807,7 @@ export const Assistant: React.FC = () => {
                 >
                   <div className="flex items-center gap-2">
                     <Icon icon="solar:sleeping-linear" className="text-neutral-400 group-hover:text-neutral-300" />
-                    <span className="text-sm font-medium text-neutral-300">Set Ayati - Quran Desktop Companion to Sleep</span>
+                    <span className="text-sm font-medium text-neutral-300">Set {APP_DISPLAY_NAME} to Sleep</span>
                   </div>
                   <span className="text-[10px] text-neutral-500">Dev action</span>
                 </button>
@@ -2220,10 +1828,23 @@ export const Assistant: React.FC = () => {
               </button>
             </div>
           </SettingsSection>
+
+          <button
+            type="button"
+            onClick={() => window.ayati.petContextMenuAction('quit')}
+            className="mt-auto w-full flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 bg-white/[0.03] text-sm font-medium text-neutral-400 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20 transition-colors"
+          >
+            <Icon icon="solar:power-linear" width="16" height="16" />
+            <span>Quit {APP_DISPLAY_NAME}</span>
+          </button>
         </div>
       )}
 
-
+      <KeychainConsentModal
+        isOpen={keychainConsentOpen}
+        onContinue={() => void handleKeychainConsentContinue()}
+        onCancel={handleKeychainConsentCancel}
+      />
     </div>
   );
 };

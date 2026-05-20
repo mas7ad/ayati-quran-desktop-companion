@@ -1,6 +1,6 @@
 /*
- * Unicode-markup tajweed (Indo-Pak, etc.) on dark surfaces — tuned for Ayati panels.
- * COLR page glyphs (Madani V4 Tajweed) are explicitly scoped to the browser's dark palette keyword.
+ * Unicode-markup tajweed on dark surfaces — tuned for Ayati panels.
+ * If future COLR fonts are bundled, scope them to the browser's dark palette keyword.
  */
 .qul-arabic-text--colr-dark {
   color-scheme: dark;

@@ -9,10 +9,11 @@ function createUnsignedJwt(payload: Record<string, unknown>): string {
 }
 
 describe('QuranFoundationClient', () => {
-  it('includes nonce in the authorization URL for OpenID requests', () => {
+  it('builds the authorization URL with Authorization Code + PKCE + OIDC parameters', () => {
     const client = new QuranFoundationClient({
       clientId: 'client-id',
       redirectUri: 'ayati://oauth/callback',
+      authBaseUrl: 'https://oauth2.quran.foundation',
     });
 
     const authorizeUrl = new URL(client.buildAuthorizeUrl({
@@ -22,7 +23,42 @@ describe('QuranFoundationClient', () => {
       scopes: ['openid', 'offline_access', 'user', 'bookmark'],
     }));
 
+    expect(authorizeUrl.toString()).toContain('https://oauth2.quran.foundation/oauth2/auth');
+    expect(authorizeUrl.searchParams.get('client_id')).toBe('client-id');
+    expect(authorizeUrl.searchParams.get('redirect_uri')).toBe('ayati://oauth/callback');
+    expect(authorizeUrl.searchParams.get('response_type')).toBe('code');
+    expect(authorizeUrl.searchParams.get('scope')).toBe('openid offline_access user bookmark');
+    expect(authorizeUrl.searchParams.get('state')).toBe('state-123');
     expect(authorizeUrl.searchParams.get('nonce')).toBe('nonce-123');
+    expect(authorizeUrl.searchParams.get('code_challenge')).toBe('challenge-123');
+    expect(authorizeUrl.searchParams.get('code_challenge_method')).toBe('S256');
+  });
+
+  it('validates the returned OpenID audience when present', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: 'access-token',
+        id_token: createUnsignedJwt({ nonce: 'expected-nonce', aud: 'different-client' }),
+        expires_in: 3600,
+        scope: 'openid offline_access bookmark bookmark.create',
+      }), { status: 200 }),
+    );
+
+    const client = new QuranFoundationClient({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'ayati://oauth/callback',
+      fetchImpl: fetchMock,
+    });
+
+    await expect(client.exchangeAuthorizationCode(
+      'code-123',
+      'verifier-123',
+      'expected-nonce',
+    )).rejects.toMatchObject({
+      code: 'auth_failed',
+      safeMessage: 'Quran Foundation sign-in callback could not be verified.',
+    });
   });
 
   it('uses HTTP Basic client authentication when exchanging a code for a confidential client', async () => {
@@ -43,10 +79,99 @@ describe('QuranFoundationClient', () => {
 
     await client.exchangeAuthorizationCode('code-123', 'verifier-123');
 
-    const [, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://oauth2.quran.foundation/oauth2/token');
+    expect(init?.method).toBe('POST');
     expect(init?.headers).toMatchObject({
+      'Content-Type': 'application/x-www-form-urlencoded',
       Authorization: `Basic ${Buffer.from('client-id:client-secret').toString('base64')}`,
     });
+    expect(String(init?.body)).toContain('grant_type=authorization_code');
+    expect(String(init?.body)).toContain('code=code-123');
+    expect(String(init?.body)).toContain('redirect_uri=ayati%3A%2F%2Foauth%2Fcallback');
+    expect(String(init?.body)).toContain('code_verifier=verifier-123');
+    expect(String(init?.body)).not.toContain('client_id=');
+  });
+
+  it('exchanges authorization codes through the configured backend without a client secret', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: 'access-token',
+        refresh_token: 'refresh-token',
+        expires_in: 3600,
+        scope: 'openid offline_access user bookmark',
+      }), { status: 200 }),
+    );
+
+    const client = new QuranFoundationClient({
+      clientId: 'client-id',
+      redirectUri: 'https://ayati-website.vercel.app/oauth/callback',
+      backendBaseUrl: 'https://ayati-website.vercel.app',
+      fetchImpl: fetchMock,
+    });
+
+    await client.exchangeAuthorizationCode('code-123', 'verifier-123');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://ayati-website.vercel.app/api/quran/oauth/token');
+    expect(init?.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      code: 'code-123',
+      codeVerifier: 'verifier-123',
+      redirectUri: 'https://ayati-website.vercel.app/oauth/callback',
+    });
+    expect(String(init?.body)).not.toContain('client_secret');
+  });
+
+  it('refreshes tokens through the configured backend without a client secret', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: 'new-access-token',
+        expires_in: 3600,
+        scope: 'openid offline_access user bookmark',
+      }), { status: 200 }),
+    );
+
+    const client = new QuranFoundationClient({
+      clientId: 'client-id',
+      redirectUri: 'https://ayati-website.vercel.app/oauth/callback',
+      backendBaseUrl: 'https://ayati-website.vercel.app',
+      fetchImpl: fetchMock,
+    });
+
+    await client.refreshToken('refresh-token');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://ayati-website.vercel.app/api/quran/oauth/refresh');
+    expect(JSON.parse(String(init?.body))).toEqual({ refreshToken: 'refresh-token' });
+    expect(String(init?.body)).not.toContain('client_secret');
+  });
+
+  it('uses HTTP Basic client authentication when refreshing for a confidential client', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: 'new-access-token',
+        expires_in: 3600,
+        scope: 'openid offline_access user bookmark',
+      }), { status: 200 }),
+    );
+
+    const client = new QuranFoundationClient({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      redirectUri: 'ayati://oauth/callback',
+      fetchImpl: fetchMock,
+    });
+
+    await client.refreshToken('refresh-token');
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init?.headers).toMatchObject({
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${Buffer.from('client-id:client-secret').toString('base64')}`,
+    });
+    expect(String(init?.body)).toContain('grant_type=refresh_token');
+    expect(String(init?.body)).toContain('refresh_token=refresh-token');
     expect(String(init?.body)).not.toContain('client_id=');
   });
 
@@ -98,6 +223,31 @@ describe('QuranFoundationClient', () => {
     });
   });
 
+  it('proxies User API requests through the configured backend', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: { id: 'bookmark-1' } }), { status: 200 }),
+    );
+
+    const client = new QuranFoundationClient({
+      clientId: 'client-id',
+      redirectUri: 'ayati://oauth/callback',
+      backendBaseUrl: 'https://ayati-website.vercel.app/',
+      fetchImpl: fetchMock,
+    });
+
+    await expect(client.createBookmark('access-token', {
+      verseKey: '2:286',
+      mushafId: 4,
+    })).resolves.toEqual({ bookmarkId: 'bookmark-1' });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://ayati-website.vercel.app/api/quran/user/auth/v1/bookmarks');
+    expect(init?.headers).toMatchObject({
+      'x-auth-token': 'access-token',
+      'x-client-id': 'client-id',
+    });
+  });
+
   it('returns a typed bookmark response when the User API succeeds', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -122,6 +272,12 @@ describe('QuranFoundationClient', () => {
       verseKey: '2:286',
       mushafId: 4,
     })).resolves.toEqual({ bookmarkId: 'bookmark-1' });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init?.headers).toMatchObject({
+      'x-auth-token': 'access-token',
+      'x-client-id': 'client-id',
+    });
   });
 
   it('omits the reading bookmark flag when creating a regular saved ayah bookmark', async () => {

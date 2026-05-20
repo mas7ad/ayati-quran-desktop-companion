@@ -82,9 +82,10 @@ OpenAI-compatible providers append `/chat/completions`; Claude appends `/message
 - **Open in System**: Open files/folders in your default system application
 
 ### Auto-Updates
-- **Automatic Updates**: Check for and download updates via `electron-updater`
+- **Automatic Updates**: Check stable website metadata at `https://ayati-website.vercel.app/update/latest.json`
+- **Installer Downloads**: Download the platform-specific installer URL published in the website metadata, with SHA-256 verification when provided
 - **Update Notifications**: Badge indicator in settings when updates are available
-- **Cross-Platform**: Supports macOS, Windows, and Linux update feeds
+- **Cross-Platform**: Supports macOS Apple Silicon, macOS Intel, and Windows x64 metadata entries
 
 ### Customization
 - **Customizable Hotkeys**: Configure global shortcuts for chat, capture, and assistant
@@ -124,17 +125,27 @@ Ayati uses the required Quran Foundation API categories:
 - **User API:** `POST {QURAN_API_BASE_URL}/auth/v1/activity-days` plus `GET /auth/v1/streaks/current-streak-days?type=QURAN` to record Quran activity and display the current streak.
 - **OAuth2/OIDC:** `GET {QURAN_AUTH_BASE_URL}/oauth2/auth` and `POST {QURAN_AUTH_BASE_URL}/oauth2/token` using PKCE authorization code flow for user sign-in and refresh.
 
-Configure local demo credentials in `.env.local`:
+Packaged release builds ignore `.env` / `.env.local`, use **production** Quran Foundation endpoints, the public Ayati `QF_CLIENT_ID`, `https://ayati-website.vercel.app/oauth/callback`, and delegate token exchange to the Ayati website (Vercel). See [docs/api-keys.md](docs/api-keys.md) for the release checklist.
+
+For **local development** with your own Quran Foundation client (direct OAuth, like the pre-Vercel setup), use `.env.local`:
 
 ```bash
-QURAN_CLIENT_ID=your-quran-foundation-client-id
-QURAN_CLIENT_SECRET=your-quran-foundation-client-secret
-QURAN_REDIRECT_URI=ayati://oauth/callback
+QF_CLIENT_ID=<your-client-id>
+QF_CLIENT_SECRET=<your-client-secret>
+QURAN_REDIRECT_URI=https://ayati-website.vercel.app/oauth/callback
 QURAN_FOUNDATION_ENV=prelive
-QURAN_CONTENT_API_BASE_URL=https://api.quran.com/api/v4
 ```
 
-For production, move token exchange to a backend proxy. Desktop apps cannot truly hide client secrets.
+For **production-style local testing** without a desktop secret, use only public config in `.env.local`:
+
+```bash
+QF_CLIENT_ID=0059acb5-8d81-4535-8070-02c072166ff8
+QURAN_REDIRECT_URI=https://ayati-website.vercel.app/oauth/callback
+QURAN_BACKEND_BASE_URL=https://ayati-website.vercel.app
+QURAN_FOUNDATION_ENV=production
+```
+
+`QF_CLIENT_SECRET` for release builds belongs only in the Ayati website/Vercel environment. Never log authorization codes, PKCE verifiers, access tokens, refresh tokens, ID tokens, or client secrets.
 
 ## Demo Script
 
@@ -188,7 +199,7 @@ bun run dist:win
 bun run dist:linux
 ```
 
-Unsigned builds are downloadable, but macOS Gatekeeper will warn users. For public distribution, build on a Mac with an Apple Developer account, a valid Developer ID Application certificate in Keychain, and Apple notarization credentials configured for Electron Builder. Then upload the DMG, ZIP, blockmap, and `latest-mac.yml` files from `release/` to a GitHub Release or another static download host matching the `build.publish.url` setting in `package.json`.
+Unsigned builds are downloadable, but macOS Gatekeeper will warn users. For public distribution, build on a Mac with an Apple Developer account, a valid Developer ID Application certificate in Keychain, and Apple notarization credentials configured for Electron Builder. Then upload the macOS Apple Silicon DMG, macOS Intel DMG, and Windows x64 installer to GitHub Releases. Update the Ayati website download redirects and `public/update/latest.json` so both the landing page and the desktop app point at the same release assets. The legacy `electron-updater` generic feed in `package.json` is kept as an opt-in fallback by launching with `AYATI_USE_ELECTRON_UPDATER=true`.
 
 ## Project Structure
 

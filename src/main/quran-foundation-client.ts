@@ -17,6 +17,7 @@ interface QuranFoundationClientOptions {
   authBaseUrl?: string;
   apiBaseUrl?: string;
   contentApiBaseUrl?: string;
+  backendBaseUrl?: string;
   fetchImpl?: FetchLike;
 }
 
@@ -141,16 +142,35 @@ function getUserNameFromIdToken(idToken?: string): string | undefined {
   return typeof payload.email === 'string' ? payload.email : undefined;
 }
 
-function assertIdTokenNonce(idToken: string | undefined, expectedNonce: string | undefined): void {
-  if (!expectedNonce || !idToken) return;
+function assertIdTokenClaims(
+  idToken: string | undefined,
+  expectedNonce: string | undefined,
+  expectedAudience: string,
+): void {
+  if (!idToken) return;
 
   const payload = decodeJwtPayload(idToken);
-  if (payload?.nonce === expectedNonce) return;
-
-  throw new QuranFoundationError(
+  const isInvalid = () => new QuranFoundationError(
     'auth_failed',
     'Quran Foundation sign-in callback could not be verified.',
   );
+
+  if (expectedNonce && payload?.nonce !== expectedNonce) {
+    throw isInvalid();
+  }
+
+  const audience = payload?.aud;
+  if (typeof audience === 'string' && audience !== expectedAudience) {
+    throw isInvalid();
+  }
+  if (Array.isArray(audience) && !audience.includes(expectedAudience)) {
+    throw isInvalid();
+  }
+
+  const expiresAtSeconds = typeof payload?.exp === 'number' ? payload.exp : null;
+  if (expiresAtSeconds && expiresAtSeconds * 1000 <= Date.now()) {
+    throw isInvalid();
+  }
 }
 
 export function createPkcePair(): { verifier: string; challenge: string } {
@@ -166,6 +186,7 @@ export class QuranFoundationClient {
   private readonly authBaseUrl: string;
   private readonly apiBaseUrl: string;
   private readonly contentApiBaseUrl: string;
+  private readonly backendBaseUrl?: string;
   private readonly fetchImpl: FetchLike;
 
   constructor(options: QuranFoundationClientOptions) {
@@ -175,6 +196,7 @@ export class QuranFoundationClient {
     this.authBaseUrl = options.authBaseUrl ?? getDefaultAuthBaseUrl();
     this.apiBaseUrl = options.apiBaseUrl ?? getDefaultApiBaseUrl();
     this.contentApiBaseUrl = options.contentApiBaseUrl ?? getDefaultContentApiBaseUrl();
+    this.backendBaseUrl = options.backendBaseUrl?.replace(/\/+$/, '');
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
@@ -210,6 +232,14 @@ export class QuranFoundationClient {
     codeVerifier: string,
     expectedNonce?: string,
   ): Promise<StoredTokenSet> {
+    if (this.backendBaseUrl) {
+      return this.requestBackendToken('/api/quran/oauth/token', {
+        code,
+        codeVerifier,
+        redirectUri: this.redirectUri,
+      }, expectedNonce);
+    }
+
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
@@ -221,6 +251,10 @@ export class QuranFoundationClient {
   }
 
   async refreshToken(refreshToken: string): Promise<StoredTokenSet> {
+    if (this.backendBaseUrl) {
+      return this.requestBackendToken('/api/quran/oauth/refresh', { refreshToken });
+    }
+
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
@@ -304,7 +338,7 @@ export class QuranFoundationClient {
   ): Promise<QuranBookmarkResult> {
     const { surah, ayah } = parseVerseKey(params.verseKey);
 
-    const response = await this.fetchImpl(new URL('/auth/v1/bookmarks', this.apiBaseUrl).toString(), {
+    const response = await this.fetchImpl(this.getUserApiUrl('/auth/v1/bookmarks'), {
       method: 'POST',
       headers: {
         ...this.getApiHeaders(accessToken),
@@ -488,7 +522,7 @@ export class QuranFoundationClient {
   }
 
   async createCollection(accessToken: string, name: string): Promise<AyahCollection> {
-    const response = await this.fetchImpl(new URL('/auth/v1/collections', this.apiBaseUrl).toString(), {
+    const response = await this.fetchImpl(this.getUserApiUrl('/auth/v1/collections'), {
       method: 'POST',
       headers: {
         ...this.getApiHeaders(accessToken),
@@ -515,7 +549,7 @@ export class QuranFoundationClient {
   }
 
   async listCollections(accessToken: string): Promise<AyahCollection[]> {
-    const response = await this.fetchImpl(new URL('/auth/v1/collections', this.apiBaseUrl).toString(), {
+    const response = await this.fetchImpl(this.getUserApiUrl('/auth/v1/collections'), {
       method: 'GET',
       headers: this.getApiHeaders(accessToken),
     });
@@ -543,7 +577,7 @@ export class QuranFoundationClient {
   ): Promise<boolean> {
     const { surah, ayah } = parseVerseKey(verseKey);
     const response = await this.fetchImpl(
-      new URL(`/auth/v1/collections/${encodeURIComponent(collectionId)}/bookmarks`, this.apiBaseUrl).toString(),
+      this.getUserApiUrl(`/auth/v1/collections/${encodeURIComponent(collectionId)}/bookmarks`),
       {
         method: 'POST',
         headers: {
@@ -572,7 +606,7 @@ export class QuranFoundationClient {
     params: { reflectionId: string; verseKey: string; body: string },
   ): Promise<string | null> {
     parseVerseKey(params.verseKey);
-    const response = await this.fetchImpl(new URL('/auth/v1/notes', this.apiBaseUrl).toString(), {
+    const response = await this.fetchImpl(this.getUserApiUrl('/auth/v1/notes'), {
       method: 'POST',
       headers: {
         ...this.getApiHeaders(accessToken),
@@ -611,7 +645,7 @@ export class QuranFoundationClient {
       headers['x-timezone'] = params.timezone;
     }
 
-    const response = await this.fetchImpl(new URL('/auth/v1/activity-days', this.apiBaseUrl).toString(), {
+    const response = await this.fetchImpl(this.getUserApiUrl('/auth/v1/activity-days'), {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -630,7 +664,7 @@ export class QuranFoundationClient {
   }
 
   async getCurrentStreakDays(accessToken: string, timezone?: string): Promise<number | null> {
-    const url = new URL('/auth/v1/streaks/current-streak-days', this.apiBaseUrl);
+    const url = new URL(this.getUserApiUrl('/auth/v1/streaks/current-streak-days'));
     url.searchParams.set('type', 'QURAN');
     const headers = this.getApiHeaders(accessToken);
     if (timezone) {
@@ -673,7 +707,49 @@ export class QuranFoundationClient {
         'Quran Foundation returned an unexpected token response.',
       );
     }
-    assertIdTokenNonce(tokenResponse.id_token, expectedNonce);
+    assertIdTokenClaims(tokenResponse.id_token, expectedNonce, this.clientId);
+
+    const expiresAt = tokenResponse.expires_at
+      ? Date.parse(tokenResponse.expires_at)
+      : Date.now() + (tokenResponse.expires_in ?? 3600) * 1000;
+
+    return {
+      accessToken: tokenResponse.access_token,
+      refreshToken: tokenResponse.refresh_token,
+      idToken: tokenResponse.id_token,
+      scopes: parseScopes(tokenResponse.scope),
+      expiresAt,
+      userName: getUserNameFromIdToken(tokenResponse.id_token),
+    };
+  }
+
+  private async requestBackendToken(
+    path: string,
+    body: Record<string, string>,
+    expectedNonce?: string,
+  ): Promise<StoredTokenSet> {
+    if (!this.backendBaseUrl) {
+      throw new QuranFoundationError('missing_config', 'Quran Foundation backend is not configured.');
+    }
+
+    const response = await this.fetchImpl(new URL(path, `${this.backendBaseUrl}/`).toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      throw sanitizeApiError(response.status);
+    }
+
+    const tokenResponse = await response.json() as Partial<TokenResponse>;
+    if (!tokenResponse.access_token) {
+      throw new QuranFoundationError(
+        'invalid_response',
+        'Quran Foundation returned an unexpected token response.',
+      );
+    }
+    assertIdTokenClaims(tokenResponse.id_token, expectedNonce, this.clientId);
 
     const expiresAt = tokenResponse.expires_at
       ? Date.parse(tokenResponse.expires_at)
@@ -706,6 +782,14 @@ export class QuranFoundationClient {
 
   private getContentUrl(path: string): URL {
     return new URL(path.replace(/^\/+/, ''), `${this.contentApiBaseUrl.replace(/\/+$/, '')}/`);
+  }
+
+  private getUserApiUrl(path: string): string {
+    if (this.backendBaseUrl) {
+      return new URL(`/api/quran/user/${path.replace(/^\/+/, '')}`, `${this.backendBaseUrl}/`).toString();
+    }
+
+    return new URL(path, this.apiBaseUrl).toString();
   }
 
   private getApiHeaders(accessToken: string | null): Record<string, string> {

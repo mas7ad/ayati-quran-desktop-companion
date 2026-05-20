@@ -1,3 +1,4 @@
+import { APP_DISPLAY_NAME } from '../shared/app-branding';
 import type { RankedAyahCandidate, ScreenInsight } from './ayah-types';
 
 /** When the ranked list has a clear winner, skip the second LLM round-trip (~seconds). */
@@ -59,7 +60,7 @@ function buildSelectionPrompt(insight: ScreenInsight, candidates: RankedAyahCand
     whyThisVerse: candidate.whyThisVerse,
   }));
 
-  return `Choose the best Quran verse candidate for Ayati - Quran Desktop Companion from a privacy-preserving screen description.
+  return `Choose the best Quran verse candidate for ${APP_DISPLAY_NAME} from a privacy-preserving screen description.
 
 Screen description:
 ${insight.summary}
@@ -84,7 +85,7 @@ export async function selectAyahCandidateWithAi(
 ): Promise<RankedAyahCandidate> {
   const deterministicCandidate = candidates[0];
   if (!deterministicCandidate) {
-    throw new Error('Ayati - Quran Desktop Companion cannot select from an empty candidate list.');
+    throw new Error(`${APP_DISPLAY_NAME} cannot select from an empty candidate list.`);
   }
 
   if (insight.isSensitive || deterministicCandidate.isFallback) {

@@ -11,7 +11,10 @@ describe('getQulFontPackPresence', () => {
     const root = path.join(process.cwd(), 'assets', 'qul');
     const presence = getQulFontPackPresence(root);
     expect(presence.madani1421).toBe(true);
-    expect(presence.madaniV4Tajweed).toBe(true);
+    expect(presence.indoPakNastaleeq).toBe(true);
     expect(presence).not.toHaveProperty('madani1405');
+    expect(presence).not.toHaveProperty('madaniTajweed');
+    expect(presence).not.toHaveProperty('madaniV4Tajweed');
+    expect(presence).not.toHaveProperty('qpcNastaleeq');
   });
 });

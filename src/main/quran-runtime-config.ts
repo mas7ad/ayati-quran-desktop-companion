@@ -10,6 +10,8 @@ export interface QuranRuntimeConfigEnv {
   QURAN_AUTH_BASE_URL?: string;
   QURAN_API_BASE_URL?: string;
   QURAN_CONTENT_API_BASE_URL?: string;
+  QURAN_BACKEND_BASE_URL?: string;
+  AYATI_QURAN_BACKEND_BASE_URL?: string;
 }
 
 export interface QuranRuntimeConfig {
@@ -19,6 +21,7 @@ export interface QuranRuntimeConfig {
   authBaseUrl?: string;
   apiBaseUrl?: string;
   contentApiBaseUrl?: string;
+  backendBaseUrl?: string;
 }
 
 interface ResolveQuranClientConfigOptions {
@@ -43,12 +46,21 @@ function getDefaultContentApiBaseUrl(): string {
   return 'https://api.quran.com/api/v4';
 }
 
+/** Public Ayati client id for release builds (no desktop secret; token exchange via Vercel). */
+export const DEFAULT_PUBLIC_QURAN_CLIENT_ID = '0059acb5-8d81-4535-8070-02c072166ff8';
+const DEFAULT_QURAN_REDIRECT_URI = 'https://ayati-website.vercel.app/oauth/callback';
+const DEFAULT_QURAN_BACKEND_BASE_URL = 'https://ayati-website.vercel.app';
+/** Release builds default to production Quran Foundation endpoints. */
+export const DEFAULT_QURAN_FOUNDATION_ENV = 'production' as const;
+
 function pickNonBlank(...values: Array<string | null | undefined>): string | undefined {
   return values.find((value) => typeof value === 'string' && value.trim().length > 0)?.trim();
 }
 
 function normalizeQuranEnvironment(environment?: string): 'prelive' | 'production' {
-  return environment === 'production' ? 'production' : 'prelive';
+  const normalized = environment?.trim().toLowerCase();
+  if (normalized === 'production') return 'production';
+  return 'prelive';
 }
 
 export function resolveQuranClientConfig({
@@ -63,19 +75,39 @@ export function resolveQuranClientConfig({
   const hasSetupCredentials = Boolean(
     pickNonBlank(setupConfig.clientId, setupConfig.encryptedClientSecret),
   );
+  const explicitClientId = pickNonBlank(setupConfig.clientId, envClientId);
+  const clientId = explicitClientId ?? DEFAULT_PUBLIC_QURAN_CLIENT_ID;
+  const usesBundledPublicClient = clientId === DEFAULT_PUBLIC_QURAN_CLIENT_ID;
+
+  let localClientSecret = pickNonBlank(setupSecret, envClientSecret);
+  if (usesBundledPublicClient && !setupSecret) {
+    localClientSecret = undefined;
+  }
+  const usesLocalConfidentialClient = Boolean(localClientSecret);
+
   const environment = normalizeQuranEnvironment(hasSetupCredentials
     ? setupConfig.environment
-    : (env.QURAN_FOUNDATION_ENV || setupConfig.environment));
+    : (env.QURAN_FOUNDATION_ENV || DEFAULT_QURAN_FOUNDATION_ENV));
   const authBaseUrl = pickNonBlank(env.QURAN_AUTH_BASE_URL) ?? getDefaultAuthBaseUrl(environment);
   const apiBaseUrl = pickNonBlank(env.QURAN_API_BASE_URL) ?? getDefaultApiBaseUrl(environment);
   const contentApiBaseUrl = pickNonBlank(env.QURAN_CONTENT_API_BASE_URL) ?? getDefaultContentApiBaseUrl();
+  const backendBaseUrl = usesLocalConfidentialClient
+    ? undefined
+    : (pickNonBlank(env.QURAN_BACKEND_BASE_URL, env.AYATI_QURAN_BACKEND_BASE_URL)
+      ?? DEFAULT_QURAN_BACKEND_BASE_URL);
+
+  const redirectUri = pickNonBlank(
+    env.QURAN_REDIRECT_URI,
+    hasSetupCredentials ? setupConfig.redirectUri : undefined,
+  ) ?? DEFAULT_QURAN_REDIRECT_URI;
 
   return {
-    clientId: pickNonBlank(setupConfig.clientId, envClientId) ?? '',
-    clientSecret: pickNonBlank(setupSecret, envClientSecret),
-    redirectUri: pickNonBlank(setupConfig.redirectUri, env.QURAN_REDIRECT_URI) ?? 'ayati://oauth/callback',
+    clientId,
+    clientSecret: usesLocalConfidentialClient ? localClientSecret : undefined,
+    redirectUri,
     authBaseUrl,
     apiBaseUrl,
     contentApiBaseUrl,
+    backendBaseUrl,
   };
 }

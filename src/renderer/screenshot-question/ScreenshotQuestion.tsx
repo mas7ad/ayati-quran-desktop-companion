@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 
+import { APP_DISPLAY_NAME } from '../../shared/app-branding';
 import { AyahVerseCard } from './AyahVerseCard';
 
 type CaptureState = 'checking' | 'permission' | 'capturing' | 'analyzing' | 'ready' | 'error';
@@ -15,7 +16,7 @@ function getErrorMessage(error: unknown): string {
     return error.replace(ipcErrorPrefix, '');
   }
 
-  return 'Ayati - Quran Desktop Companion could not create a reflection right now.';
+  return `${APP_DISPLAY_NAME} could not create a reflection right now.`;
 }
 
 export function ScreenshotQuestion(): JSX.Element {
@@ -188,7 +189,7 @@ export function ScreenshotQuestion(): JSX.Element {
           {captureState === 'permission' && (
             <div className="ayah-state">
               <h2>Screen Recording is required</h2>
-              <p>Enable Ayati - Quran Desktop Companion in System Settings &gt; Privacy &amp; Security &gt; Screen Recording, then try again.</p>
+              <p>Enable {APP_DISPLAY_NAME} in System Settings &gt; Privacy &amp; Security &gt; Screen Recording, then try again.</p>
             </div>
           )}
 

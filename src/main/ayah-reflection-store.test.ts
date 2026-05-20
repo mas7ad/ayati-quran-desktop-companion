@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   createDefaultAyahLensState,
   addReflectionToCollectionLocal,
+  listReflectionIdsNeedingBookmarkSync,
   saveReflectionLocally,
   saveReflectionNoteLocal,
   setReflectionFeedbackLocal,
   markReflectionPendingSync,
+  markReflectionSynced,
 } from './ayah-reflection-store';
 import type { AyahReflection } from './ayah-types';
 
@@ -60,6 +62,29 @@ describe('ayah reflection store helpers', () => {
     expect(nextState.reflections[0].syncState).toBe('pending');
     expect(nextState.pendingSync).toEqual([
       { reflectionId: 'reflection-1', action: 'bookmark', attempts: 1 },
+    ]);
+  });
+
+  it('lists saved reflections that still need bookmark sync', () => {
+    const state = saveReflectionLocally(createDefaultAyahLensState(), createReflection({
+      savedAt: Date.now(),
+    }));
+
+    expect(listReflectionIdsNeedingBookmarkSync(state)).toEqual(['reflection-1']);
+  });
+
+  it('clears only bookmark pending sync when a reflection is marked synced', () => {
+    let state = saveReflectionLocally(createDefaultAyahLensState(), createReflection({
+      savedAt: Date.now(),
+    }));
+    state = markReflectionPendingSync(state, 'reflection-1', 'bookmark');
+    state = markReflectionPendingSync(state, 'reflection-1', 'note');
+
+    const nextState = markReflectionSynced(state, 'reflection-1', 'bookmark-1');
+
+    expect(nextState.reflections[0].syncState).toBe('synced');
+    expect(nextState.pendingSync).toEqual([
+      { reflectionId: 'reflection-1', action: 'note', attempts: 1 },
     ]);
   });
 

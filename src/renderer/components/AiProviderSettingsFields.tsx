@@ -1,3 +1,4 @@
+import { APP_DISPLAY_NAME } from '../../shared/app-branding';
 import {
   AI_PROVIDER_CONFIGS,
   DEFAULT_OPENROUTER_BASE_URL,
@@ -107,8 +108,8 @@ export function AiProviderSettingsFields({
           }
         >
           {providerConfig.protocol === 'anthropic-messages'
-            ? 'Ayati - Quran Desktop Companion appends /messages to this Claude API base URL.'
-            : 'Ayati - Quran Desktop Companion appends /chat/completions to this base URL.'}
+            ? `${APP_DISPLAY_NAME} appends /messages to this Claude API base URL.`
+            : `${APP_DISPLAY_NAME} appends /chat/completions to this base URL.`}
         </p>
       </div>
       <div>

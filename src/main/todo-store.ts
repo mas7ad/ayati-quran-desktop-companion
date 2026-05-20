@@ -52,6 +52,27 @@ function sortTodoItems(items: TodoItem[], now: number): TodoItem[] {
   });
 }
 
+/** Local calendar day start (00:00:00) for the given timestamp. */
+export function getStartOfLocalDay(now: number): number {
+  const date = new Date(now);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+/** Removes completed tasks from before today (local midnight rollover). */
+export function purgeCompletedTodos(state: TodoState, now: number = Date.now()): TodoState {
+  const startOfToday = getStartOfLocalDay(now);
+  const items = state.items.filter((item) => !item.completedAt || item.completedAt >= startOfToday);
+  if (items.length === state.items.length) return state;
+
+  const remainingIds = new Set(items.map((item) => item.id));
+  return {
+    ...state,
+    items,
+    sentReminderIds: state.sentReminderIds.filter((id) => remainingIds.has(id)),
+  };
+}
+
 export function listTodos(state: TodoState, now: number = Date.now()): TodoItem[] {
   return sortTodoItems(state.items, now);
 }
