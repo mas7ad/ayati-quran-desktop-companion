@@ -260,7 +260,7 @@ describe('Assistant updates in settings', () => {
       render(<Assistant />);
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
     expect(screen.queryByRole('option', { name: "Mishari Rashid al-`Afasy" })).not.toBeInTheDocument();
     await userEvent.selectOptions(await screen.findByLabelText('Reminder Listen Reciter'), '4');
 
@@ -285,7 +285,7 @@ describe('Assistant updates in settings', () => {
       render(<Assistant />);
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
     await userEvent.selectOptions(await screen.findByLabelText('Companion appearance'), 'cosmo');
 
     expect(ayati.updateSettings).toHaveBeenCalledWith('pet.appearanceId', 'cosmo');
@@ -370,7 +370,7 @@ describe('Assistant updates in settings', () => {
       expect(ayati.downloadUpdate).toHaveBeenCalled();
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
     expect(screen.queryByText('Check for new releases and install updates')).not.toBeInTheDocument();
   });
 });
@@ -387,9 +387,9 @@ describe('Assistant productivity tabs', () => {
       render(<Assistant />);
     });
 
-    expect(await screen.findByRole('button', { name: 'Prayers' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'To Do' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Focus' })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: 'Prayers' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'To Do' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Focus' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Chat' })).not.toBeInTheDocument();
     expect(await screen.findByLabelText('Prayer city')).toBeInTheDocument();
     expect(screen.getByLabelText('Prayer country')).toHaveRole('combobox');
@@ -415,13 +415,13 @@ describe('Assistant productivity tabs', () => {
       expect(screen.queryByRole('button', { name: 'Save Prayer Settings' })).not.toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByRole('button', { name: 'To Do' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'To Do' }));
     await userEvent.click(screen.getByRole('button', { name: 'Add Task' }));
     await userEvent.type(await screen.findByLabelText('Task title'), 'Read tafsir');
     await userEvent.click(screen.getByRole('button', { name: 'Add Task' }));
     expect(ayati.createTodo).toHaveBeenCalledWith(expect.objectContaining({ title: 'Read tafsir' }));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Focus' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'Focus' }));
     expect(await screen.findByText('25:00')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Start Focus' }));
     expect(ayati.startPomodoro).toHaveBeenCalledWith(expect.objectContaining({ kind: 'focus' }));
@@ -448,11 +448,11 @@ describe('Assistant productivity tabs', () => {
       render(<Assistant />);
     });
 
-    expect(await screen.findByRole('button', { name: 'Prayers' })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: 'Prayers' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save Prayer Settings' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Prayer calculation method')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'Settings' }));
     expect(await screen.findByText('Prayer Awareness')).toBeInTheDocument();
     expect(screen.getByDisplayValue('London')).toBeInTheDocument();
   });
@@ -478,7 +478,7 @@ describe('Assistant settings shortcuts', () => {
       render(<Assistant />);
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
 
     expect(await screen.findByText('Quran Reminders')).toBeInTheDocument();
     expect(screen.queryByLabelText(/provider/i)).not.toBeInTheDocument();
@@ -496,7 +496,7 @@ describe('Assistant settings shortcuts', () => {
       render(<Assistant />);
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
 
     const openAssistant = await screen.findByText('Open Assistant');
     const hideApp = screen.getByText('Hide App');
@@ -504,7 +504,7 @@ describe('Assistant settings shortcuts', () => {
     expect(screen.queryByText('Open Chat')).not.toBeInTheDocument();
     expect(screen.queryByText('Reflect on Screen')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /change open assistant shortcut, currently ⌘ \+ ⌥ \+ \./i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /change hide app shortcut, currently ⌘ \+ ⌥ \+ ⇧ \+ ,/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /change hide app shortcut, currently ⌘ \+ ⌥ \+ ,/i })).toBeInTheDocument();
   });
 });
 
@@ -524,7 +524,7 @@ describe('Assistant developer settings', () => {
       render(<Assistant />);
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
 
     expect(await screen.findByRole('button', { name: 'running-right' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'review' })).toBeInTheDocument();
@@ -547,7 +547,7 @@ describe('Assistant developer settings', () => {
       render(<Assistant />);
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
     await userEvent.click(await screen.findByRole('button', { name: /test reminder comment/i }));
 
     expect(ayati.forceTimedReminderComment).toHaveBeenCalledTimes(1);
@@ -567,7 +567,7 @@ describe('Assistant developer settings', () => {
       render(<Assistant />);
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
     await userEvent.click(await screen.findByRole('button', { name: /test prayer reminder \(maghrib\)/i }));
 
     expect(ayati.forcePrayerReminderComment).toHaveBeenCalledTimes(1);
@@ -587,7 +587,7 @@ describe('Assistant developer settings', () => {
       render(<Assistant />);
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }));
+    await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
     await userEvent.click(await screen.findByRole('button', { name: /test to do reminder/i }));
 
     expect(ayati.forceTodoReminderComment).toHaveBeenCalledTimes(1);
