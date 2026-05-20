@@ -82,10 +82,10 @@ OpenAI-compatible providers append `/chat/completions`; Claude appends `/message
 - **Open in System**: Open files/folders in your default system application
 
 ### Auto-Updates
-- **Automatic Updates**: Check stable website metadata at `https://ayati-website.vercel.app/update/latest.json`
-- **Installer Downloads**: Download the platform-specific installer URL published in the website metadata, with SHA-256 verification when provided
+- **Seamless Updates**: Check the stable Electron update feed at `https://ayati-website.vercel.app/update/electron`
+- **GitHub-hosted Binaries**: Download update assets from GitHub Releases using Electron Builder metadata hosted on the website
 - **Update Notifications**: Badge indicator in settings when updates are available
-- **Cross-Platform**: Supports macOS Apple Silicon, macOS Intel, and Windows x64 metadata entries
+- **Cross-Platform**: Supports macOS Apple Silicon, macOS Intel, and Windows x64 updater metadata
 
 ### Customization
 - **Customizable Hotkeys**: Configure global shortcuts for chat, capture, and assistant
@@ -199,7 +199,7 @@ bun run dist:win
 bun run dist:linux
 ```
 
-Unsigned builds are downloadable, but macOS Gatekeeper will warn users. For public distribution, build on a Mac with an Apple Developer account, a valid Developer ID Application certificate in Keychain, and Apple notarization credentials configured for Electron Builder. Then upload the macOS Apple Silicon DMG, macOS Intel DMG, and Windows x64 installer to GitHub Releases. Update the Ayati website download redirects and `public/update/latest.json` so both the landing page and the desktop app point at the same release assets. The legacy `electron-updater` generic feed in `package.json` is kept as an opt-in fallback by launching with `AYATI_USE_ELECTRON_UPDATER=true`.
+Unsigned builds are downloadable, but macOS Gatekeeper will warn users. For public distribution, build on a Mac with an Apple Developer account, a valid Developer ID Application certificate in Keychain, and Apple notarization credentials configured for Electron Builder. Then upload the macOS DMGs, macOS ZIPs, Windows NSIS installer, blockmaps, and Electron Builder YAML metadata to GitHub Releases as needed. Keep the website landing page redirects pointed at the DMG/EXE installers, and keep the website `/update/electron` feed pointed at the Electron Builder update metadata for seamless in-app updates.
 
 ## Project Structure
 

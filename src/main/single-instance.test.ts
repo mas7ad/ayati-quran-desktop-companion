@@ -12,18 +12,18 @@ function createWindow() {
 }
 
 function createApp(hasLock: boolean) {
-  const listeners = new Map<string, () => void>();
+  const listeners = new Map<string, (event: unknown, argv: string[]) => void>();
 
   return {
     app: {
-      on: vi.fn((eventName: string, listener: () => void) => {
+      on: vi.fn((eventName: string, listener: (event: unknown, argv: string[]) => void) => {
         listeners.set(eventName, listener);
       }),
       quit: vi.fn(),
       requestSingleInstanceLock: vi.fn(() => hasLock),
     },
-    emit(eventName: string) {
-      listeners.get(eventName)?.();
+    emit(eventName: string, argv: string[] = []) {
+      listeners.get(eventName)?.({}, argv);
     },
   };
 }
@@ -61,5 +61,15 @@ describe('enforceSingleInstanceApp', () => {
     expect(window.restore).toHaveBeenCalledTimes(1);
     expect(window.show).toHaveBeenCalledTimes(1);
     expect(window.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes second instance argv to the optional callback', () => {
+    const { app, emit } = createApp(true);
+    const onSecondInstance = vi.fn();
+
+    enforceSingleInstanceApp(app, () => null, onSecondInstance);
+    emit('second-instance', ['app', 'ayati://oauth/callback?code=abc&state=xyz']);
+
+    expect(onSecondInstance).toHaveBeenCalledWith(['app', 'ayati://oauth/callback?code=abc&state=xyz']);
   });
 });

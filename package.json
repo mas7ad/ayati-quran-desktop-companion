@@ -1,6 +1,6 @@
 {
   "name": "ayati-quran-desktop-companion",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "license": "SEE LICENSE IN LICENSE",
   "author": "Mikhail Wijanarko",
   "homepage": "https://ayati-website.vercel.app/",
@@ -163,7 +163,7 @@
     },
     "publish": {
       "provider": "generic",
-      "url": "https://github.com/mwijanarko1/ayati-quran-desktop-companion/releases/latest/download"
+      "url": "https://ayati-website.vercel.app/update/electron"
     }
   },
   "trustedDependencies": [

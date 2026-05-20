@@ -1,5 +1,5 @@
 export interface SingleInstanceApp {
-  on(eventName: 'second-instance', listener: () => void): void;
+  on(eventName: 'second-instance', listener: (event: unknown, argv: string[]) => void): void;
   quit(): void;
   requestSingleInstanceLock(): boolean;
 }
@@ -29,13 +29,15 @@ export function focusExistingInstanceWindow(window: FocusableAppWindow | null): 
 export function enforceSingleInstanceApp(
   app: SingleInstanceApp,
   getWindowToFocus: () => FocusableAppWindow | null,
+  onSecondInstance?: (argv: string[]) => void,
 ): boolean {
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     return false;
   }
 
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
+    onSecondInstance?.(argv);
     focusExistingInstanceWindow(getWindowToFocus());
   });
 

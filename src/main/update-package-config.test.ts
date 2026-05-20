@@ -26,12 +26,12 @@ describe('Electron updater packaging config', () => {
     expect(packageJson.build?.artifactName).toBe('${productName}-${version}-${arch}.${ext}');
   });
 
-  it('publishes updater metadata from the GitHub latest release download feed', () => {
+  it('publishes updater metadata from the stable Ayati website update feed', () => {
     const packageJson = readPackageJson();
 
     expect(packageJson.build?.publish).toEqual({
       provider: 'generic',
-      url: 'https://github.com/mwijanarko1/ayati-quran-desktop-companion/releases/latest/download',
+      url: 'https://ayati-website.vercel.app/update/electron',
     });
   });
 });

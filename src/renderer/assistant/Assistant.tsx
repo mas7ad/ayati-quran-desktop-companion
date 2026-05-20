@@ -175,8 +175,8 @@ function getUpdateStatusLabel(state: DesktopUpdateState | null): string {
 
 function getUpdateButtonLabel(state: DesktopUpdateState | null): string {
   const action = getUpdateAction(state);
-  if (action === 'download') return 'Download Installer';
-  if (action === 'install') return 'Open Installer';
+  if (action === 'download') return 'Download Update';
+  if (action === 'install') return 'Restart and Install';
   if (state?.status === 'checking') return 'Checking...';
   return 'Check for Updates';
 }
@@ -202,7 +202,7 @@ function getTitleBarUpdateButtonText(state: DesktopUpdateState | null): string {
       ? `Downloading ${Math.floor(state.downloadPercent)}%`
       : 'Downloading…';
   }
-  if (state.status === 'downloaded') return 'Open installer';
+  if (state.status === 'downloaded') return 'Restart to update';
   if (state.status === 'error' && state.canRetry) return 'Retry update';
   return 'Update';
 }
@@ -218,6 +218,9 @@ const PREFERRED_TRANSLATION_ID = 131;
 const PREFERRED_TAFSIR_ID = 169;
 
 type QuranContentListResource = { id: number; name: string; languageName?: string };
+type PomodoroMinuteSettingKey = 'focusMinutes' | 'shortBreakMinutes' | 'longBreakMinutes';
+
+const SETTINGS_NUMBER_INPUT_CLASS = 'w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all';
 
 export const Assistant: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('prayers');
@@ -243,6 +246,11 @@ export const Assistant: React.FC = () => {
   const [todoReminderAt, setTodoReminderAt] = useState('');
   const [todoAddDropdownOpen, setTodoAddDropdownOpen] = useState(false);
   const [pomodoroState, setPomodoroState] = useState<PomodoroState | null>(null);
+  const [pomodoroSettingsDraft, setPomodoroSettingsDraft] = useState<Record<PomodoroMinuteSettingKey, string>>({
+    focusMinutes: '25',
+    shortBreakMinutes: '5',
+    longBreakMinutes: '15',
+  });
   /** Bumps once per second while a session is running so `Date.now()`-based remaining time re-renders. */
   const [pomodoroUiTick, setPomodoroUiTick] = useState(0);
   const [selectedFocusTodoId, setSelectedFocusTodoId] = useState('');
@@ -321,6 +329,15 @@ export const Assistant: React.FC = () => {
   useEffect(() => {
     void window.ayati.getQulFontPacks().then(setQulFontPacks).catch(() => setQulFontPacks(null));
   }, []);
+
+  useEffect(() => {
+    if (!pomodoroState?.settings) return;
+    setPomodoroSettingsDraft({
+      focusMinutes: String(pomodoroState.settings.focusMinutes),
+      shortBreakMinutes: String(pomodoroState.settings.shortBreakMinutes),
+      longBreakMinutes: String(pomodoroState.settings.longBreakMinutes),
+    });
+  }, [pomodoroState?.settings.focusMinutes, pomodoroState?.settings.shortBreakMinutes, pomodoroState?.settings.longBreakMinutes]);
 
   useEffect(() => {
     const pomodoroRunning = pomodoroState?.activeSession?.status === 'running';
@@ -477,7 +494,7 @@ export const Assistant: React.FC = () => {
       }
 
       if (action === 'install') {
-        const confirmed = confirm('Open the downloaded Ayati installer now? Ayati will quit so you can complete the update.');
+        const confirmed = confirm('Restart Ayati - Quran Desktop Companion now to install the downloaded update?');
         if (!confirmed) return;
         const result = await window.ayati.installUpdate();
         setUpdateState(result.state);
@@ -611,6 +628,23 @@ export const Assistant: React.FC = () => {
   const updatePomodoroSettingsFromPanel = useCallback(async (patch: Partial<PomodoroSettings>) => {
     setPomodoroState(await window.ayati.updatePomodoroSettings(patch));
   }, []);
+
+  const updatePomodoroMinuteDraftFromPanel = useCallback((key: PomodoroMinuteSettingKey, rawValue: string) => {
+    setPomodoroSettingsDraft((current) => ({ ...current, [key]: rawValue }));
+  }, []);
+
+  const commitPomodoroMinuteDraftFromPanel = useCallback((key: PomodoroMinuteSettingKey) => {
+    const fallback = pomodoroState?.settings[key] ?? (key === 'focusMinutes' ? 25 : key === 'shortBreakMinutes' ? 5 : 15);
+    const rawValue = pomodoroSettingsDraft[key];
+    const nextValue = Number(rawValue);
+
+    if (rawValue.trim() === '' || !Number.isInteger(nextValue) || nextValue < 1) {
+      setPomodoroSettingsDraft((current) => ({ ...current, [key]: String(fallback) }));
+      return;
+    }
+
+    void updatePomodoroSettingsFromPanel({ [key]: nextValue });
+  }, [pomodoroSettingsDraft, pomodoroState?.settings, updatePomodoroSettingsFromPanel]);
 
   const startPomodoroFromPanel = useCallback(async (kind: PomodoroSessionKind) => {
     const duration = kind === 'focus'
@@ -1082,15 +1116,39 @@ export const Assistant: React.FC = () => {
           <div className="grid grid-cols-3 gap-2">
             <label className="block text-xs text-neutral-400">
               Focus
-              <input type="number" min={1} value={pomodoroState?.settings.focusMinutes ?? 25} onChange={(event) => updatePomodoroSettingsFromPanel({ focusMinutes: Number(event.target.value) })} className="mt-1 w-full bg-[#0a0a0a] border border-white/10 rounded-md px-2 py-2 text-sm text-neutral-200" />
+              <input
+                type="number"
+                min={1}
+                max={240}
+                value={pomodoroSettingsDraft.focusMinutes}
+                onChange={(event) => updatePomodoroMinuteDraftFromPanel('focusMinutes', event.target.value)}
+                onBlur={() => commitPomodoroMinuteDraftFromPanel('focusMinutes')}
+                className={`mt-1 ${SETTINGS_NUMBER_INPUT_CLASS}`}
+              />
             </label>
             <label className="block text-xs text-neutral-400">
               Short Break
-              <input type="number" min={1} value={pomodoroState?.settings.shortBreakMinutes ?? 5} onChange={(event) => updatePomodoroSettingsFromPanel({ shortBreakMinutes: Number(event.target.value) })} className="mt-1 w-full bg-[#0a0a0a] border border-white/10 rounded-md px-2 py-2 text-sm text-neutral-200" />
+              <input
+                type="number"
+                min={1}
+                max={120}
+                value={pomodoroSettingsDraft.shortBreakMinutes}
+                onChange={(event) => updatePomodoroMinuteDraftFromPanel('shortBreakMinutes', event.target.value)}
+                onBlur={() => commitPomodoroMinuteDraftFromPanel('shortBreakMinutes')}
+                className={`mt-1 ${SETTINGS_NUMBER_INPUT_CLASS}`}
+              />
             </label>
             <label className="block text-xs text-neutral-400">
               Long Break
-              <input type="number" min={1} value={pomodoroState?.settings.longBreakMinutes ?? 15} onChange={(event) => updatePomodoroSettingsFromPanel({ longBreakMinutes: Number(event.target.value) })} className="mt-1 w-full bg-[#0a0a0a] border border-white/10 rounded-md px-2 py-2 text-sm text-neutral-200" />
+              <input
+                type="number"
+                min={1}
+                max={120}
+                value={pomodoroSettingsDraft.longBreakMinutes}
+                onChange={(event) => updatePomodoroMinuteDraftFromPanel('longBreakMinutes', event.target.value)}
+                onBlur={() => commitPomodoroMinuteDraftFromPanel('longBreakMinutes')}
+                className={`mt-1 ${SETTINGS_NUMBER_INPUT_CLASS}`}
+              />
             </label>
           </div>
           <div className="grid grid-cols-3 gap-2">
@@ -1671,8 +1729,9 @@ export const Assistant: React.FC = () => {
             </div>
           </SettingsSection>
 
-          <SettingsSection title="Developer">
-            <div className="space-y-4">
+          {isDevEnvironment && (
+            <SettingsSection title="Developer">
+              <div className="space-y-4">
               {isDevEnvironment && (
                 <label className="flex items-center justify-between cursor-pointer group px-1">
                   <div className="flex flex-col">
@@ -1826,8 +1885,9 @@ export const Assistant: React.FC = () => {
                 </div>
                 <span className="text-[10px] text-neutral-500">Restart required</span>
               </button>
-            </div>
-          </SettingsSection>
+              </div>
+            </SettingsSection>
+          )}
 
           <button
             type="button"

@@ -240,8 +240,10 @@ const AUTO_UPDATE_STARTUP_DELAY_MS = 10_000;
 /** Background check interval when auto-updates are enabled. */
 const AUTO_UPDATE_POLL_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_UPDATE_METADATA_URL = 'https://ayati-website.vercel.app/update/latest.json';
+const DEFAULT_ELECTRON_UPDATE_FEED_URL = 'https://ayati-website.vercel.app/update/electron';
 const UPDATE_METADATA_URL = process.env.AYATI_UPDATE_METADATA_URL || DEFAULT_UPDATE_METADATA_URL;
-const USE_WEBSITE_UPDATE_METADATA = process.env.AYATI_USE_ELECTRON_UPDATER !== 'true';
+const ELECTRON_UPDATE_FEED_URL = process.env.AYATI_ELECTRON_UPDATE_FEED_URL || DEFAULT_ELECTRON_UPDATE_FEED_URL;
+const USE_WEBSITE_UPDATE_METADATA = process.env.AYATI_USE_WEBSITE_UPDATE_METADATA === 'true';
 const REQUIRED_QURAN_DEMO_SCOPES = [
   'collection',
   'collection.create',
@@ -262,7 +264,7 @@ const DEV_WINDOW_BORDER_CSS = `
 `;
 const debugBorderStyleKeys = new WeakMap<BrowserWindow, string>();
 
-const shouldStartApp = enforceSingleInstanceApp(app, getSingleInstanceFocusWindow);
+const shouldStartApp = enforceSingleInstanceApp(app, getSingleInstanceFocusWindow, handleSecondInstanceArgs);
 
 if (shouldStartApp) {
   app.setName(APP_DISPLAY_NAME);
@@ -516,9 +518,39 @@ function getQuranAuthStatus(): QuranAuthStatus {
   return getQuranAuthStatusFromState(getAyahLensState());
 }
 
+function isQuranOAuthCallbackUrl(value: string): boolean {
+  return value.startsWith('ayati://oauth/callback')
+    && (value.includes('code=') || value.includes('error='));
+}
+
+function findQuranOAuthCallbackUrl(values: readonly string[]): string | null {
+  return values.find(isQuranOAuthCallbackUrl) ?? null;
+}
+
+function handleSecondInstanceArgs(argv: string[]): void {
+  const callbackUrl = findQuranOAuthCallbackUrl(argv);
+  if (callbackUrl) {
+    deliverQuranOAuthCallback(callbackUrl);
+  }
+}
+
 function deliverQuranOAuthCallback(callbackUrl: string): void {
+  openAssistantOnTab('settings');
   const targetWindow = assistantWindow && !assistantWindow.isDestroyed() ? assistantWindow : null;
-  targetWindow?.webContents.send('ayah-oauth-callback', callbackUrl);
+  if (!targetWindow) return;
+
+  const sendCallback = () => {
+    if (targetWindow.isDestroyed()) return;
+    targetWindow.webContents.send('ayah-oauth-callback', callbackUrl);
+  };
+
+  if (targetWindow.webContents.isLoading()) {
+    targetWindow.webContents.once('did-finish-load', () => {
+      setTimeout(sendCallback, 100);
+    });
+  } else {
+    sendCallback();
+  }
 }
 
 async function getQuranUserAccessToken(): Promise<string | null> {
@@ -5727,7 +5759,7 @@ function readAppUpdateYml(): Record<string, string> | null {
 
 function hasUpdateFeedConfig(): boolean {
   if (USE_WEBSITE_UPDATE_METADATA) return Boolean(UPDATE_METADATA_URL);
-  return readAppUpdateYml() !== null || Boolean(process.env.AYATI_MOCK_UPDATE_URL);
+  return Boolean(ELECTRON_UPDATE_FEED_URL) || readAppUpdateYml() !== null || Boolean(process.env.AYATI_MOCK_UPDATE_URL);
 }
 
 function resolveAutoUpdateDisabledReason(): string | null {
@@ -5886,12 +5918,10 @@ function setupAutoUpdater() {
     return;
   }
 
-  if (process.env.AYATI_MOCK_UPDATE_URL) {
-    autoUpdater.setFeedURL({
-      provider: 'generic',
-      url: process.env.AYATI_MOCK_UPDATE_URL,
-    });
-  }
+  autoUpdater.setFeedURL({
+    provider: 'generic',
+    url: process.env.AYATI_MOCK_UPDATE_URL || ELECTRON_UPDATE_FEED_URL,
+  });
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -6055,8 +6085,7 @@ if (shouldStartApp) {
 
   app.on('open-url', (event, url) => {
     event.preventDefault();
-    if (!url.startsWith('ayati://oauth/callback')) return;
-    if (!url.includes('code=') && !url.includes('error=')) return;
+    if (!isQuranOAuthCallbackUrl(url)) return;
     deliverQuranOAuthCallback(url);
   });
 
