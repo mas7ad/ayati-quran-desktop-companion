@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Icon } from '@iconify/react';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { QulArabicText } from '../components/QulArabicText';
 import { HotkeyInput } from '../components/HotkeyInput';
 import { SettingsSection } from '../components/SettingsSection';
@@ -807,191 +813,181 @@ export const Assistant: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex px-2 border-b border-white/5 shrink-0 bg-[#0f0f0f] overflow-x-auto scrollbar-hide">
-        <button
-          onClick={() => switchTab('prayers')}
-          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
-            activeTab === 'prayers'
-              ? 'text-[#67E0A3] border-[#67E0A3]'
-              : 'text-neutral-500 border-transparent hover:text-neutral-300'
-          }`}
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => switchTab(value as Tab)}
+        className="flex min-h-0 flex-1 flex-col gap-0 bg-[#0f0f0f]"
+      >
+        <TabsList
+          variant="line"
+          className="h-auto w-full justify-start overflow-x-auto rounded-none border-b border-white/5 bg-[#0f0f0f] px-2 py-0 text-neutral-500 scrollbar-hide"
         >
-          Prayers
-        </button>
-        <button
-          onClick={() => switchTab('todos')}
-          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
-            activeTab === 'todos'
-              ? 'text-[#67E0A3] border-[#67E0A3]'
-              : 'text-neutral-500 border-transparent hover:text-neutral-300'
-          }`}
-        >
-          To Do
-        </button>
-        <button
-          onClick={() => switchTab('focus')}
-          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
-            activeTab === 'focus'
-              ? 'text-[#67E0A3] border-[#67E0A3]'
-              : 'text-neutral-500 border-transparent hover:text-neutral-300'
-          }`}
-        >
-          Focus
-        </button>
-        <button
-          onClick={() => switchTab('reflections')}
-          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
-            activeTab === 'reflections'
-              ? 'text-[#67E0A3] border-[#67E0A3]'
-              : 'text-neutral-500 border-transparent hover:text-neutral-300'
-          }`}
-        >
-          Reflections
-        </button>
-        <button
-          onClick={() => switchTab('settings')}
-          className={`px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
-            activeTab === 'settings'
-              ? 'text-[#67E0A3] border-[#67E0A3]'
-              : 'text-neutral-500 border-transparent hover:text-neutral-300'
-          }`}
-        >
-          Settings
-        </button>
-      </div>
+          <TabsTrigger value="prayers" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
+            Prayers
+          </TabsTrigger>
+          <TabsTrigger value="todos" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
+            To Do
+          </TabsTrigger>
+          <TabsTrigger value="focus" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
+            Focus
+          </TabsTrigger>
+          <TabsTrigger value="reflections" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
+            Reflections
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
+            Settings
+          </TabsTrigger>
+        </TabsList>
 
-      {activeTab === 'prayers' && (
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
+      <TabsContent value="prayers" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
+          {activeTab === 'prayers' && (
+        <div className="flex-1 overflow-y-auto px-3 pt-3 pb-0 space-y-2.5 scrollbar-hide">
           {!currentPrayerDraft.hasSavedSettings && (
             <section className="border border-white/10 rounded-md p-3 bg-white/[0.03]">
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
                   <span className="block text-xs font-medium text-neutral-300 mb-2">Country</span>
-                  <select
-                    aria-label="Prayer country"
+                  <Select
                     value={currentPrayerDraft.country}
-                    onChange={(event) => {
-                      const country = event.target.value;
+                    onValueChange={(country) => {
                       const firstCity = PRAYER_LOCATION_PRESETS.find((preset) => preset.country === country)?.cities[0] ?? '';
                       setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), country, city: firstCity }));
                     }}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3]"
                   >
-                    <option value="">Select country</option>
-                    {prayerCountryOptions.map((country) => (
-                      <option key={country} value={country}>{country}</option>
-                    ))}
-                  </select>
+                    <SelectTrigger aria-label="Prayer country" className="w-full border-white/10 bg-[#0a0a0a] text-neutral-200 focus-visible:border-[#67E0A3] focus-visible:ring-[#67E0A3]/30">
+                      <SelectValue placeholder="Select country" />
+                    </SelectTrigger>
+                    <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                      {prayerCountryOptions.map((country) => (
+                        <SelectItem key={country} value={country}>{country}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </label>
                 <label className="block">
                   <span className="block text-xs font-medium text-neutral-300 mb-2">City</span>
-                  <select
-                    aria-label="Prayer city"
+                  <Select
                     value={currentPrayerDraft.city}
-                    onChange={(event) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), city: event.target.value }))}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3]"
+                    onValueChange={(city) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), city }))}
                   >
-                    <option value="">Select city</option>
-                    {prayerCityOptions.map((city) => (
-                      <option key={city} value={city}>{city}</option>
-                    ))}
-                  </select>
+                    <SelectTrigger aria-label="Prayer city" className="w-full border-white/10 bg-[#0a0a0a] text-neutral-200 focus-visible:border-[#67E0A3] focus-visible:ring-[#67E0A3]/30">
+                      <SelectValue placeholder="Select city" />
+                    </SelectTrigger>
+                    <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                      {prayerCityOptions.map((city) => (
+                        <SelectItem key={city} value={city}>{city}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </label>
                 <label className="flex items-center gap-2 text-sm text-neutral-300">
-                  <input
-                    type="checkbox"
+                  <Switch
                     checked={currentPrayerDraft.enabled}
-                    onChange={(event) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), enabled: event.target.checked }))}
+                    onCheckedChange={(enabled) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), enabled }))}
+                    className="data-checked:bg-[#67E0A3]"
                   />
                   Enable Prayer Awareness
                 </label>
                 <label className="block">
                   <span className="block text-xs font-medium text-neutral-300 mb-2">Reminder Lead Minutes</span>
-                  <input
+                  <Input
                     type="number"
                     min={0}
                     max={120}
                     value={currentPrayerDraft.reminderLeadMinutes}
                     onChange={(event) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), reminderLeadMinutes: Number(event.target.value) }))}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3]"
+                    className="border-white/10 bg-[#0a0a0a] text-neutral-200 focus-visible:border-[#67E0A3] focus-visible:ring-[#67E0A3]/30"
                   />
                 </label>
                 <label className="block">
                   <span className="block text-xs font-medium text-neutral-300 mb-2">Calculation Method</span>
-                  <select
-                    aria-label="Prayer calculation method"
-                    value={currentPrayerDraft.method}
-                    onChange={(event) => {
-                      const method = Number(event.target.value);
+                  <Select
+                    value={String(currentPrayerDraft.method)}
+                    onValueChange={(value) => {
+                      const method = Number(value);
                       setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), method }));
                       persistPrayerCalculationFromDraft({ method });
                     }}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3]"
                   >
-                    {PRAYER_CALCULATION_METHODS.map((method) => (
-                      <option key={method.id} value={method.id}>{method.label}</option>
-                    ))}
-                  </select>
+                    <SelectTrigger aria-label="Prayer calculation method" className="w-full border-white/10 bg-[#0a0a0a] text-neutral-200 focus-visible:border-[#67E0A3] focus-visible:ring-[#67E0A3]/30">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                      {PRAYER_CALCULATION_METHODS.map((method) => (
+                        <SelectItem key={method.id} value={String(method.id)}>{method.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <p className="text-[11px] text-neutral-500 mt-1.5 leading-snug" role="note">{PRAYER_CALCULATION_METHOD_UK_NOTE}</p>
                 </label>
                 <label className="block">
                   <span className="block text-xs font-medium text-neutral-300 mb-2">Juristic School</span>
-                  <select
-                    aria-label="Prayer juristic school"
-                    value={currentPrayerDraft.school}
-                    onChange={(event) => {
-                      const school = Number(event.target.value) as 0 | 1;
+                  <Select
+                    value={String(currentPrayerDraft.school)}
+                    onValueChange={(value) => {
+                      const school = Number(value) as 0 | 1;
                       setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), school }));
                       persistPrayerCalculationFromDraft({ school });
                     }}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3]"
                   >
-                    {PRAYER_JURISTIC_SCHOOLS.map((school) => (
-                      <option key={school.id} value={school.id}>{school.label}</option>
-                    ))}
-                  </select>
+                    <SelectTrigger aria-label="Prayer juristic school" className="w-full border-white/10 bg-[#0a0a0a] text-neutral-200 focus-visible:border-[#67E0A3] focus-visible:ring-[#67E0A3]/30">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                      {PRAYER_JURISTIC_SCHOOLS.map((school) => (
+                        <SelectItem key={school.id} value={String(school.id)}>{school.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </label>
               </div>
-              <button
+              <Button
                 type="button"
                 onClick={savePrayerSettings}
-                className="mt-3 w-full px-3 py-2 bg-[#67E0A3] text-[#07120f] rounded-md text-xs font-semibold"
+                className="mt-3 w-full bg-[#67E0A3] text-[#07120f] hover:bg-[#67E0A3]/90"
+                size="sm"
               >
                 Save Prayer Settings
-              </button>
+              </Button>
             </section>
           )}
 
-          <section className="border border-white/10 rounded-md p-3 bg-white/[0.03]">
-            <p className="text-xs text-neutral-500">Next Prayer</p>
-            <h3 className="mt-1 text-xl font-semibold text-white">
-              {nextPrayer
-                ? `${nextPrayer.label}${nextPrayerIsTomorrow ? ' (tomorrow)' : ''}`
-                : 'No upcoming prayer loaded'}
-            </h3>
-            {nextPrayer && (
-              <p
-                className="mt-1 text-sm text-neutral-400 tabular-nums"
-                aria-label={`${formatNextPrayerCountdown(nextPrayer.at - now)} until ${nextPrayer.label}`}
-              >
-                {formatNextPrayerCountdown(nextPrayer.at - now)}
-              </p>
-            )}
-            {prayerDay?.error && <p className="mt-2 text-xs text-amber-300">{prayerDay.error}</p>}
-          </section>
+          <Card className="ring-0 gap-0 border border-white/10 rounded-md px-4 py-3 bg-white/[0.03] shadow-none">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-neutral-500">Next Prayer</p>
+                <h3 className="truncate text-lg font-semibold text-white">
+                  {nextPrayer
+                    ? `${nextPrayer.label}${nextPrayerIsTomorrow ? ' (tomorrow)' : ''}`
+                    : 'No upcoming prayer loaded'}
+                </h3>
+              </div>
+              {nextPrayer && (
+                <p
+                  className="shrink-0 text-sm text-neutral-400 tabular-nums"
+                  aria-label={`${formatNextPrayerCountdown(nextPrayer.at - now)} until ${nextPrayer.label}`}
+                >
+                  {formatNextPrayerCountdown(nextPrayer.at - now)}
+                </p>
+              )}
+            </div>
+            {prayerDay?.error && <p className="mt-1 text-xs text-amber-300">{prayerDay.error}</p>}
+          </Card>
 
           <div className="space-y-2">
             {(prayerDay?.prayers ?? []).map((prayer) => (
-              <div key={prayer.name} className="flex items-center justify-between border border-white/10 rounded-md px-3 py-2">
+              <Card key={prayer.name} className="ring-0 gap-0 flex-row items-center justify-between border border-white/10 rounded-md px-3 py-2.5 bg-white/[0.03] shadow-none" size="sm">
                 <span className="text-sm text-neutral-200">{prayer.label}</span>
                 <span className="text-sm text-[#67E0A3] tabular-nums">{prayer.time}</span>
-              </div>
+              </Card>
             ))}
           </div>
         </div>
-      )}
+          )}
+        </TabsContent>
 
-      {activeTab === 'todos' && (
+        <TabsContent value="todos" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
+          {activeTab === 'todos' && (
         <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
           <div className="relative" ref={todoAddDropdownRef}>
             {!todoAddDropdownOpen ? (
@@ -1092,7 +1088,10 @@ export const Assistant: React.FC = () => {
         </div>
       )}
 
-      {activeTab === 'focus' && (
+        </TabsContent>
+
+        <TabsContent value="focus" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
+          {activeTab === 'focus' && (
         <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
           <section className="text-center border border-white/10 rounded-md p-5 bg-white/[0.03]">
             <p className="text-xs text-neutral-500">{pomodoroState?.activeSession?.kind ?? 'focus'}</p>
@@ -1164,7 +1163,10 @@ export const Assistant: React.FC = () => {
       )}
 
       {/* CONTENT: Reflections */}
-      {activeTab === 'reflections' && (
+        </TabsContent>
+
+        <TabsContent value="reflections" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
+          {activeTab === 'reflections' && (
         <div className="flex-1 flex flex-col overflow-y-auto p-4 scrollbar-hide">
 
           {quranStatusMessage && (
@@ -1346,7 +1348,10 @@ export const Assistant: React.FC = () => {
       )}
 
       {/* CONTENT: Settings */}
-      {activeTab === 'settings' && (
+        </TabsContent>
+
+        <TabsContent value="settings" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
+          {activeTab === 'settings' && (
         <div className="flex-1 flex flex-col overflow-y-auto p-5 space-y-4 scrollbar-hide">
           <SettingsSection title="Quran Reminders">
             <div className="space-y-4">
@@ -1898,7 +1903,9 @@ export const Assistant: React.FC = () => {
             <span>Quit {APP_DISPLAY_NAME}</span>
           </button>
         </div>
-      )}
+          )}
+        </TabsContent>
+      </Tabs>
 
       <KeychainConsentModal
         isOpen={keychainConsentOpen}
