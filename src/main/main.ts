@@ -211,7 +211,10 @@ let ayahPendingReflectionEchoUntil = 0;
 let watchers: Watchers | null = null;
 let clawbot: ClawBotClient | null = null;
 const store = createStore();
-let quranOAuthSession: { state: string; nonce: string; verifier: string; createdAt: number } | null = null;
+type QuranOAuthSession = { state: string; nonce: string; verifier: string; createdAt: number };
+type StoredQuranOAuthSession = { state: string; nonce: string; encryptedVerifier: string; createdAt: number };
+const QURAN_OAUTH_PENDING_SESSION_STORE_KEY = 'quranOAuth.pendingSession';
+let quranOAuthSession: QuranOAuthSession | null = null;
 const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
   platform: process.platform,
   processArch: process.arch,
@@ -521,6 +524,49 @@ function getQuranAuthStatus(): QuranAuthStatus {
 function isQuranOAuthCallbackUrl(value: string): boolean {
   return value.startsWith('ayati://oauth/callback')
     && (value.includes('code=') || value.includes('error='));
+}
+
+function isStoredQuranOAuthSession(value: unknown): value is StoredQuranOAuthSession {
+  if (!value || typeof value !== 'object') return false;
+  const session = value as Partial<StoredQuranOAuthSession>;
+  return typeof session.state === 'string'
+    && session.state.length > 0
+    && typeof session.nonce === 'string'
+    && session.nonce.length > 0
+    && typeof session.encryptedVerifier === 'string'
+    && session.encryptedVerifier.length > 0
+    && typeof session.createdAt === 'number';
+}
+
+function persistPendingQuranOAuthSession(session: QuranOAuthSession): void {
+  quranOAuthSession = session;
+  const encryptedVerifier = encryptSecret(session.verifier);
+  if (!encryptedVerifier) return;
+  store.set(QURAN_OAUTH_PENDING_SESSION_STORE_KEY, {
+    state: session.state,
+    nonce: session.nonce,
+    encryptedVerifier,
+    createdAt: session.createdAt,
+  } satisfies StoredQuranOAuthSession);
+}
+
+function getPendingQuranOAuthSession(): QuranOAuthSession | null {
+  if (quranOAuthSession) return quranOAuthSession;
+  const storedSession = store.get(QURAN_OAUTH_PENDING_SESSION_STORE_KEY);
+  if (!isStoredQuranOAuthSession(storedSession)) return null;
+  const verifier = decryptSecret(storedSession.encryptedVerifier);
+  if (!verifier) return null;
+  return {
+    state: storedSession.state,
+    nonce: storedSession.nonce,
+    verifier,
+    createdAt: storedSession.createdAt,
+  };
+}
+
+function clearPendingQuranOAuthSession(): void {
+  quranOAuthSession = null;
+  (store as { delete: (key: string) => void }).delete(QURAN_OAUTH_PENDING_SESSION_STORE_KEY);
 }
 
 function findQuranOAuthCallbackUrl(values: readonly string[]): string | null {
@@ -4624,7 +4670,7 @@ function setupIPC() {
     const pkce = createPkcePair();
     const state = randomUUID();
     const nonce = randomUUID();
-    quranOAuthSession = { state, nonce, verifier: pkce.verifier, createdAt: Date.now() };
+    persistPendingQuranOAuthSession({ state, nonce, verifier: pkce.verifier, createdAt: Date.now() });
 
     const quranConfig = resolveQuranClientConfig({
       state: getAyahLensState(),
@@ -4659,7 +4705,7 @@ function setupIPC() {
       const url = new URL(callbackUrl);
       const error = url.searchParams.get('error');
       if (error) {
-        quranOAuthSession = null;
+        clearPendingQuranOAuthSession();
         return {
           isConnected: false,
           scopes: [],
@@ -4669,8 +4715,8 @@ function setupIPC() {
 
       const state = url.searchParams.get('state');
       const code = url.searchParams.get('code');
-      const session = quranOAuthSession;
-      quranOAuthSession = null;
+      const session = getPendingQuranOAuthSession();
+      clearPendingQuranOAuthSession();
       if (!code || !session || state !== session.state || Date.now() - session.createdAt > QURAN_OAUTH_SESSION_TTL_MS) {
         return {
           isConnected: false,
