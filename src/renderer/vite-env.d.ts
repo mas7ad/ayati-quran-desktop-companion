@@ -371,6 +371,7 @@ interface AyatiAPI {
   forcePetSleep: () => void;
   forceActiveAppComment: () => Promise<boolean>;
   forceTimedReminderComment: () => Promise<boolean>;
+  forceWelcomeChatBubble: () => Promise<boolean>;
   forcePrayerReminderComment: () => Promise<boolean>;
   forceTodoReminderComment: () => Promise<boolean>;
   toggleChatbar: () => void;

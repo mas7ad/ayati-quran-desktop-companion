@@ -167,7 +167,7 @@ export const HotkeyInput: React.FC<HotkeyInputProps> = ({
     : 'text-sm font-medium text-neutral-200';
   const descriptionClassName = isSetupInverted
     ? "font-['Source_Sans_3','Segoe_UI',system-ui,sans-serif] mt-1.5 text-[13px] font-medium leading-relaxed text-[#1a2a24]/55"
-    : 'text-xs mt-1 leading-snug text-neutral-500';
+    : 'text-sm mt-1 leading-snug text-neutral-500';
   const buttonClassName = isRecording
     ? getRecordingClassName(isSetupInverted)
     : getIdleClassName(isSetupInverted);

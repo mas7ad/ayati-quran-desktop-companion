@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('ayati', {
   forcePetSleep: () => ipcRenderer.send('force-pet-sleep'),
   forceActiveAppComment: () => ipcRenderer.invoke('dev-force-active-app-comment'),
   forceTimedReminderComment: () => ipcRenderer.invoke('dev-force-timed-reminder-comment'),
+  forceWelcomeChatBubble: () => ipcRenderer.invoke('dev-force-welcome-chat-bubble'),
   forcePrayerReminderComment: () => ipcRenderer.invoke('dev-force-prayer-reminder-comment'),
   forceTodoReminderComment: () => ipcRenderer.invoke('dev-force-todo-reminder-comment'),
   toggleChatbar: () => ipcRenderer.send('toggle-chatbar'),

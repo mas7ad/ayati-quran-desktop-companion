@@ -3,6 +3,8 @@ import type { SVGProps } from 'react';
 export type OnboardingIconName =
   | 'chat'
   | 'check'
+  | 'chevron-right'
+  | 'clock'
   | 'cloud'
   | 'command'
   | 'eye'
@@ -10,13 +12,15 @@ export type OnboardingIconName =
   | 'history'
   | 'key'
   | 'lock'
+  | 'minus'
   | 'mouse'
   | 'power'
   | 'shield'
   | 'spinner'
   | 'verified'
   | 'warning'
-  | 'window';
+  | 'window'
+  | 'x';
 
 interface OnboardingIconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
   name: OnboardingIconName;
@@ -57,6 +61,15 @@ function renderIconPath(name: OnboardingIconName) {
         <>
           <circle cx="12" cy="12" r="8.5" />
           <path d="m8.5 12.3 2.2 2.2 4.8-5" />
+        </>
+      );
+    case 'chevron-right':
+      return <path d="m9 6 6 6-6 6" />;
+    case 'clock':
+      return (
+        <>
+          <circle cx="12" cy="12" r="8.5" />
+          <path d="M12 7.5V12l3.5 2" />
         </>
       );
     case 'cloud':
@@ -108,6 +121,8 @@ function renderIconPath(name: OnboardingIconName) {
           <path d="M8.5 11V8.5a3.5 3.5 0 0 1 7 0V11M12 15v2" />
         </>
       );
+    case 'minus':
+      return <path d="M5 12h14" />;
     case 'mouse':
       return (
         <>
@@ -155,6 +170,12 @@ function renderIconPath(name: OnboardingIconName) {
         <>
           <rect height="14" rx="2" width="18" x="3" y="5" />
           <path d="M3 9h18M7 7h.01M10 7h.01" />
+        </>
+      );
+    case 'x':
+      return (
+        <>
+          <path d="M6 6l12 12M18 6l-12 12" />
         </>
       );
     default:

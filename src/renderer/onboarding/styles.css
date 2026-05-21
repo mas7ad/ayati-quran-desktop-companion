@@ -22,35 +22,16 @@ h1, h2, .brand-display { font-family: 'Outfit', system-ui, sans-serif; }
 .brand-ui { font-family: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif; }
 code, .font-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-/* Onboarding — shared layout & type rhythm (fonts per docs/BRAND_GUIDELINES.md) */
-.onboarding-step-column {
-  @apply min-h-full w-full max-w-[540px] mx-auto px-12 pt-14 pb-8;
+/* Onboarding — shared layout & type rhythm */
+.onboarding-step-root {
+  @apply min-h-full w-full max-w-[520px] mx-auto px-5;
 }
 .onboarding-kicker {
-  font-family: 'Outfit', system-ui, sans-serif;
-  @apply text-[10px] font-bold tracking-[0.2em] uppercase text-[#67E0A3];
+  @apply text-sm font-medium text-neutral-500 uppercase tracking-widest;
 }
 .onboarding-step-title {
-  font-family: 'Outfit', system-ui, sans-serif;
-  @apply text-[32px] font-semibold tracking-tight text-[#1a2a24];
+  @apply text-xl font-semibold text-white;
 }
 .onboarding-step-lede {
-  font-family: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
-  @apply text-[15px] text-[#1a2a24]/60 max-w-[440px] leading-relaxed font-medium;
-}
-.onboarding-welcome-root {
-  @apply min-h-full w-full max-w-[540px] mx-auto px-12 flex flex-col items-center text-center pt-16 pb-8;
-}
-.onboarding-complete-root {
-  @apply min-h-full w-full max-w-[540px] mx-auto px-12 flex flex-col items-center text-center pt-12 pb-8;
-}
-
-/* Autofill fix */
-input:-webkit-autofill,
-input:-webkit-autofill:hover,
-input:-webkit-autofill:focus,
-input:-webkit-autofill:active {
-  -webkit-box-shadow: 0 0 0 30px #FAF9F6 inset !important;
-  -webkit-text-fill-color: #1a2a24 !important;
-  transition: background-color 5000s ease-in-out 0s;
+  @apply text-sm text-neutral-600 mt-px leading-relaxed;
 }

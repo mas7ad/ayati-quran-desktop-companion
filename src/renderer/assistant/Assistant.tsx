@@ -851,6 +851,18 @@ export const Assistant: React.FC = () => {
     }
   }, []);
 
+  const triggerWelcomeChatBubble = useCallback(async () => {
+    try {
+      const didSend = await window.ayati.forceWelcomeChatBubble();
+      if (didSend) {
+        window.ayati.closeAssistant();
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to show welcome chat bubble:', error);
+    }
+  }, []);
+
   const closeWindow = useCallback(() => {
     window.ayati.closeAssistant();
   }, []);
@@ -2017,6 +2029,19 @@ export const Assistant: React.FC = () => {
                   <span className="flex items-center gap-2">
                     <Icon icon="solar:sleeping-linear" className="text-neutral-600" />
                     <span>Set {APP_DISPLAY_NAME} to Sleep</span>
+                  </span>
+                  <span className="text-[10px] text-neutral-600">Dev action</span>
+                </button>
+              )}
+              {isDevEnvironment && (
+                <button
+                  type="button"
+                  onClick={() => { void triggerWelcomeChatBubble(); }}
+                  className="w-full flex items-center justify-between text-sm text-neutral-500 hover:text-neutral-300 transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon icon="solar:chat-round-line-linear" className="text-neutral-600" />
+                    <span>Test Welcome Chat Bubble</span>
                   </span>
                   <span className="text-[10px] text-neutral-600">Dev action</span>
                 </button>

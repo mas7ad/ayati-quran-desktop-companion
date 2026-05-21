@@ -27,7 +27,7 @@ const INITIAL_DATA: OnboardingData = {
   hotkeyHideApp: 'CommandOrControl+Alt+,',
 };
 
-type Step = 'welcome' | 'watch' | 'hotkeys' | 'complete';
+type Step = 'welcome' | 'hotkeys' | 'watch' | 'complete';
 
 const STEP_ORDER: Step[] = ['welcome', 'hotkeys', 'watch', 'complete'];
 
@@ -72,10 +72,6 @@ export function Onboarding() {
     window.ayati.onboardingMinimize();
   }, []);
 
-  const handleMaximize = useCallback(() => {
-    window.ayati.onboardingMaximize();
-  }, []);
-
   const handleComplete = useCallback(async () => {
     setIsCompleting(true);
 
@@ -89,12 +85,6 @@ export function Onboarding() {
     }
   }, [data]);
 
-  // Determine if next button should be disabled
-  const isNextDisabled = () => {
-    return false;
-  };
-
-  // Get next button text
   const getNextButtonText = () => {
     if (currentStep === 'welcome') return 'Get Started';
     if (currentStep === 'complete') {
@@ -136,106 +126,75 @@ export function Onboarding() {
   };
 
   return (
-    <div className="w-full h-full bg-[#FAF9F6] rounded-3xl shadow-2xl relative flex flex-col overflow-hidden"
-         style={{ boxShadow: '0 32px 64px -12px rgba(26, 42, 36, 0.12), 0 0 0 1px rgba(26, 42, 36, 0.05)' }}>
-
-      {/* Top Bar (Draggable) - macOS window chrome — redesigned for premium feel */}
-      <div className="drag-region h-14 flex items-center px-6 w-full z-50 select-none bg-white border-b border-[#1a2a24]/[0.05] shrink-0 relative">
-        {/* Window Controls */}
-        <div className="absolute left-6 flex items-center gap-2">
+    <div className="w-full h-full bg-[#0f0f0f] relative flex flex-col overflow-hidden">
+      {/* Minimal header — matches assistant tab style per BRAND_GUIDELINES.md */}
+      <div className="drag-region h-12 border-b border-white/5 flex items-center justify-between px-4 shrink-0 bg-[#0f0f0f]">
+        <span className="text-sm font-medium tracking-tight text-white">Ayati Setup</span>
+        <div className="flex items-center gap-1.5 no-drag">
           <button
-            className="no-drag w-3 h-3 rounded-full bg-[#ff5f57] hover:bg-[#ff453a] transition-colors cursor-pointer shrink-0 border border-black/05"
-            onClick={handleSkip}
-            title="Close"
-            aria-label="Close setup"
-          />
-          <button
-            className="no-drag w-3 h-3 rounded-full bg-[#febc2e] hover:bg-[#e0a926] transition-colors cursor-pointer shrink-0 border border-black/05"
+            className="text-neutral-500 hover:text-white transition-colors flex items-center justify-center w-6 h-6"
             onClick={handleMinimize}
-            title="Minimize"
             aria-label="Minimize"
-          />
+          >
+            <OnboardingIcon name="minus" size="1rem" />
+          </button>
           <button
-            className="no-drag w-3 h-3 rounded-full bg-[#28c840] hover:bg-[#20a134] transition-colors cursor-pointer shrink-0 border border-black/05"
-            onClick={handleMaximize}
-            title="Zoom"
-            aria-label="Zoom"
-          />
-        </div>
-
-        {/* Brand/Title */}
-        <div className="flex-1 flex items-center justify-center">
-          <span className="brand-display flex items-baseline gap-1.5 text-[13px] font-bold tracking-tight">
-            <span className="text-[#1a2a24]">Ayati</span>
-            <span className="text-[#67E0A3]">Setup Companion</span>
-          </span>
-        </div>
-
-        {/* Step Progress Indicators */}
-        <div className="absolute right-6 flex items-center gap-2">
-          {STEP_ORDER.map((step, index) => {
-            const isActive = index === currentStepIndex;
-            const isCompleted = index < currentStepIndex;
-
-            return (
-              <div
-                key={step}
-                className={`h-1.5 rounded-full transition-[background-color,width] duration-150 ease-out ${
-                  isActive
-                    ? 'bg-[#67E0A3] w-6'
-                    : isCompleted
-                    ? 'bg-[#AFF9C9] w-1.5'
-                    : 'bg-[#1a2a24]/10 w-1.5'
-                }`}
-              />
-            );
-          })}
+            className="text-neutral-500 hover:text-white transition-colors flex items-center justify-center w-6 h-6"
+            onClick={handleSkip}
+            aria-label="Close setup"
+          >
+            <OnboardingIcon name="x" size="1rem" />
+          </button>
         </div>
       </div>
 
-      {/* Center Stage Content */}
-      <div className="no-drag onboarding-scroll flex-1 overflow-y-auto scrollbar-hide relative w-full pb-20">
-        <div className="min-h-full">
+      {/* Step content */}
+      <div className="no-drag onboarding-scroll flex-1 overflow-y-auto scrollbar-hide relative w-full">
+        <div className="min-h-full flex flex-col">
           {renderStep()}
         </div>
       </div>
 
-      {/* Action Footer — solid bg, no backdrop-blur to avoid compositing cost */}
-      <div className="no-drag h-[88px] absolute bottom-0 w-full flex items-center px-10 bg-[#FAF9F6] border-t border-[#1a2a24]/[0.05] z-50 select-none">
-        <div className="flex w-full items-center gap-4">
-          <div className="flex flex-1 justify-start min-h-[48px] items-center">
+      {/* Navigation footer — text links, no containers per brand guidelines */}
+      <div className="no-drag border-t border-white/5 bg-[#0f0f0f] px-5 py-4">
+        <div className="flex items-center justify-between">
+          <div className="min-w-[80px]">
             {currentStepIndex > 0 ? (
               <button
                 type="button"
                 onClick={goToPreviousStep}
                 disabled={isCompleting}
-                className={`brand-ui px-5 py-3 rounded-2xl text-sm font-semibold border transition-[background-color,color,border-color,transform] duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#67E0A3]/80 ${
+                className={`text-base transition-colors ${
                   isCompleting
-                    ? 'border-[#1a2a24]/[0.06] text-[#1a2a24]/25 cursor-not-allowed'
-                    : 'border-[#1a2a24]/12 text-[#1a2a24]/75 hover:bg-[#1a2a24]/[0.04] hover:border-[#1a2a24]/18 active:scale-[0.98]'
+                    ? 'text-neutral-700 cursor-not-allowed'
+                    : 'text-neutral-500 hover:text-neutral-300'
                 }`}
               >
                 Back
               </button>
             ) : null}
           </div>
-          <div className="flex flex-1 justify-end">
+          <div className="text-xs text-neutral-600">
+            {currentStepIndex + 1} of {STEP_ORDER.length}
+          </div>
+          <div className="min-w-[80px] flex justify-end">
             <button
               onClick={handleNextClick}
-              disabled={isNextDisabled() || isCompleting}
+              disabled={isCompleting}
               type="button"
-              className={`px-8 py-3.5 rounded-2xl text-sm font-semibold transition-[background-color,transform,box-shadow] duration-150 flex items-center gap-2.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#67E0A3]/80 ${
-                isNextDisabled() || isCompleting
-                  ? 'bg-[#1a2a24]/10 text-[#1a2a24]/30 cursor-not-allowed'
-                  : currentStep === 'welcome'
-                  ? 'brand-display bg-[#67E0A3] text-[#1a2a24] hover:bg-[#7CF0BD] active:scale-[0.98]'
-                  : 'bg-[#1a2a24] text-[#FAF9F6] hover:bg-[#2a3a34] active:scale-[0.98]'
+              className={`text-base transition-colors flex items-center gap-1.5 ${
+                isCompleting
+                  ? 'text-neutral-700 cursor-not-allowed'
+                  : 'text-[#67E0A3] hover:text-[#7CF0BD]'
               }`}
             >
               {isCompleting && (
-                <OnboardingIcon name="spinner" size="1.125rem" className="animate-spin" />
+                <OnboardingIcon name="spinner" size="0.875rem" className="animate-spin" />
               )}
               {getNextButtonText()}
+              {!isCompleting && currentStep !== 'complete' && (
+                <OnboardingIcon name="chevron-right" size="1rem" />
+              )}
             </button>
           </div>
         </div>

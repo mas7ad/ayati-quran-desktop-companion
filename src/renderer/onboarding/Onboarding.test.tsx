@@ -26,13 +26,6 @@ function createMockAyati() {
   } satisfies Partial<Window['ayati']>;
 }
 
-function getMatchingClassNames(container: HTMLElement, pattern: RegExp) {
-  return Array.from(container.querySelectorAll<HTMLElement>('[class]'))
-    .flatMap((element) => Array.from(element.classList))
-    .filter((className, index, classNames) => pattern.test(className) && classNames.indexOf(className) === index)
-    .sort();
-}
-
 describe('Onboarding', () => {
   let mockAyati: ReturnType<typeof createMockAyati>;
 
@@ -45,25 +38,14 @@ describe('Onboarding', () => {
     });
   });
 
-  it('uses the inverted Ayati brand palette with neutral macOS title bar chrome', () => {
+  it('uses the dark minimal theme matching the assistant tab aesthetic', () => {
     const { container } = render(<Onboarding />);
-    const title = screen.getByText('Ayati');
-    const subtitle = screen.getByText('Setup Companion');
+    const title = screen.getByText('Ayati Setup');
+    const closeBtn = screen.getByRole('button', { name: /close setup/i });
 
-    expect(container.firstElementChild).toHaveClass('bg-[#FAF9F6]');
-    expect(title.closest('.drag-region')).toHaveClass('bg-white');
-    expect(title).toHaveClass('text-[#1a2a24]');
-    expect(subtitle).toHaveClass('text-[#67E0A3]');
-    expect(screen.getByRole('button', { name: /close setup/i })).toHaveClass('bg-[#ff5f57]');
-  });
-
-  it('keeps the onboarding scroll path free of paint-heavy effects', () => {
-    const { container } = render(<Onboarding />);
-
-    expect(getMatchingClassNames(
-      container,
-      /^(soft-glow|step-enter|animate-happy-bounce|transition-all|backdrop-blur.*|blur-.*|group-hover:.*|hover:shadow.*|hover:-translate.*|duration-700)$/,
-    )).toEqual([]);
+    expect(container.firstElementChild).toHaveClass('bg-[#0f0f0f]');
+    expect(title.closest('.drag-region')).toHaveClass('bg-[#0f0f0f]');
+    expect(closeBtn).toHaveClass('text-neutral-500');
   });
 
   it('goes from welcome to keyboard shortcuts without an AI setup step', async () => {

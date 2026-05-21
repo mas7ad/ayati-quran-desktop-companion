@@ -4287,6 +4287,23 @@ function startMainApp() {
     assistantWindow?.webContents.send('cron-error', data);
   });
 
+  // Show a welcome chat bubble prompting the user to open the assistant with their shortcut
+  setImmediate(() => {
+    const rawShortcut = store.get('hotkeys.openAssistant') as string;
+    const displayShortcut = rawShortcut
+      ? rawShortcut
+          .replace('CommandOrControl', '⌘')
+          .replace('Alt', '⌥')
+          .replace('Shift', '⇧')
+          .replace(/\+/g, ' + ')
+      : 'your shortcut';
+    showPetChat({
+      id: randomUUID(),
+      text: `You're all set! Press ${displayShortcut} to open the assistant.`,
+      quickReplies: ['Got it', 'Open assistant'],
+    });
+  });
+
   void syncPendingAyahReflections();
 }
 
@@ -4345,6 +4362,23 @@ function setupIPC() {
   // Force pet into sleep mode (dev utility)
   ipcMain.on('force-pet-sleep', () => {
     fallAsleep();
+  });
+
+  ipcMain.handle('dev-force-welcome-chat-bubble', () => {
+    const rawShortcut = store.get('hotkeys.openAssistant') as string;
+    const displayShortcut = rawShortcut
+      ? rawShortcut
+          .replace('CommandOrControl', '⌘')
+          .replace('Alt', '⌥')
+          .replace('Shift', '⇧')
+          .replace(/\+/g, ' + ')
+      : 'your shortcut';
+    showPetChat({
+      id: randomUUID(),
+      text: `You're all set! Press ${displayShortcut} to open the assistant.`,
+      quickReplies: ['Got it', 'Open assistant'],
+    });
+    return true;
   });
 
   // Force a test app-switch chat popup (dev utility)
