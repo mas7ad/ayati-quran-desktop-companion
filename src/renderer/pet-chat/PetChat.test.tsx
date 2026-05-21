@@ -96,7 +96,7 @@ describe('PetChat', () => {
     expect(bubble).not.toHaveClass('overflow-hidden');
     expect(tail).not.toBeNull();
     expect(content).toHaveClass('px-4', 'pt-4', 'pb-3');
-    expect(screen.getByRole('button', { name: 'Tell me more' })).toHaveClass('px-3', 'py-2');
+    expect(screen.getByRole('button', { name: 'Tell me more' })).toHaveClass('px-3', 'py-1.5');
     expect(screen.getByRole('button', { name: 'Tell me more' })).toBeInTheDocument();
 
     await waitFor(() => {
@@ -131,8 +131,8 @@ describe('PetChat', () => {
     expect(screen.getByText('ٱقْرَأْ')).toHaveAttribute('dir', 'rtl');
     expect(screen.getByText('Read, in the Name of your Lord Who created.')).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/write your reflection/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save reflection' })).toHaveClass('px-3', 'py-2');
-    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveClass('px-3', 'py-2');
+    expect(screen.getByRole('button', { name: 'Save reflection' })).toHaveClass('text-[#67E0A3]');
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveClass('text-neutral-500');
   });
 
   it('shows Tafsir between Listen and Reflect and loads it inline', async () => {

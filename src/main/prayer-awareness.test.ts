@@ -16,6 +16,7 @@ const settings: PrayerSettings = {
   school: 0,
   reminderLeadMinutes: 10,
   quietMinutesAfterPrayer: 15,
+  use24h: true,
   hasSavedSettings: false,
 };
 

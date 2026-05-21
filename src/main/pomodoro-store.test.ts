@@ -43,17 +43,13 @@ describe('pomodoro store', () => {
     expect(completed.completedFocusCount).toBe(1);
   });
 
-  it('chooses a long break after the configured focus count', () => {
-    const state = {
-      ...createDefaultAyahLensState().pomodoro,
-      completedFocusCount: 3,
-    };
-    expect(getNextPomodoroKind(state)).toBe('shortBreak');
-    expect(getNextPomodoroKind({ ...state, completedFocusCount: 4 })).toBe('longBreak');
+  it('always returns break as the next kind', () => {
+    const state = createDefaultAyahLensState().pomodoro;
+    expect(getNextPomodoroKind(state)).toBe('break');
   });
 
   it('cancels without logging completion', () => {
-    const started = startPomodoroSession(createDefaultAyahLensState().pomodoro, { kind: 'shortBreak' }, NOW);
+    const started = startPomodoroSession(createDefaultAyahLensState().pomodoro, { kind: 'break' }, NOW);
     const cancelled = cancelPomodoroSession(started, NOW + 1);
     expect(cancelled.activeSession?.status).toBe('cancelled');
     expect(cancelled.history).toHaveLength(0);

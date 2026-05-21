@@ -217,7 +217,7 @@ describe('buildTimedQuranReminder', () => {
     expect(result?.reflection).toMatchObject({
       syncState: 'local',
       screenSummary: 'A timer-based Quran reminder was due.',
-      whyThisVerse: 'This reminder was shown on the interval you set.',
+      whyThisVerse: '',
     });
   });
 

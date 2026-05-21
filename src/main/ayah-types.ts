@@ -97,6 +97,7 @@ export interface AyahReflection {
   alternateGroupId?: string;
   sourceCandidateIndex?: number;
   rankedCandidateVerseKeys?: string[];
+  footnotes?: Footnote[];
 }
 
 export interface QuranAuthStatus {
@@ -163,6 +164,7 @@ export interface PrayerSettings {
   reminderLeadMinutes: number;
   quietMinutesAfterPrayer: number;
   hasSavedSettings: boolean;
+  use24h: boolean;
 }
 
 export interface PrayerDay {
@@ -215,14 +217,12 @@ export interface TodoState {
   sentReminderIds: string[];
 }
 
-export type PomodoroSessionKind = 'focus' | 'shortBreak' | 'longBreak';
+export type PomodoroSessionKind = 'focus' | 'break';
 export type PomodoroSessionStatus = 'idle' | 'running' | 'paused' | 'completed' | 'cancelled';
 
 export interface PomodoroSettings {
   focusMinutes: number;
-  shortBreakMinutes: number;
-  longBreakMinutes: number;
-  sessionsUntilLongBreak: number;
+  breakMinutes: number;
   petRemindersEnabled: boolean;
 }
 
@@ -280,6 +280,13 @@ export interface AyahLensState {
   pomodoro: PomodoroState;
 }
 
+export interface Footnote {
+  id: number;
+  number: number;
+  text: string;
+  languageName?: string;
+}
+
 export interface QuranVerseContent {
   verseKey: string;
   surahName: string;
@@ -287,6 +294,7 @@ export interface QuranVerseContent {
   arabicText: string;
   translation: string;
   translatorId: number;
+  footnotes?: Footnote[];
 }
 
 export interface QuranBookmarkResult {

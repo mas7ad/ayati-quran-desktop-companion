@@ -7,7 +7,12 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
+      // react-day-picker v8 ships dist/index.esm.js; Vite's optimizer can look for a v9-style dist/esm path.
+      'react-day-picker': resolve(__dirname, 'node_modules/react-day-picker/dist/index.esm.js'),
     },
+  },
+  optimizeDeps: {
+    include: ['react-day-picker'],
   },
   base: './',
   root: 'src/renderer',

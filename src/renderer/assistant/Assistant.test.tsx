@@ -98,6 +98,7 @@ function createMockAyati() {
       reminderLeadMinutes: 10,
       quietMinutesAfterPrayer: 15,
       hasSavedSettings: false,
+      use24h: true,
     }),
     updatePrayerSettings: vi.fn().mockResolvedValue({
       enabled: true,
@@ -108,6 +109,7 @@ function createMockAyati() {
       reminderLeadMinutes: 10,
       quietMinutesAfterPrayer: 15,
       hasSavedSettings: true,
+      use24h: true,
     }),
     getPrayerTimes: vi.fn().mockResolvedValue({
       today: {
@@ -153,9 +155,7 @@ function createMockAyati() {
     getPomodoroState: vi.fn().mockResolvedValue({
       settings: {
         focusMinutes: 25,
-        shortBreakMinutes: 5,
-        longBreakMinutes: 15,
-        sessionsUntilLongBreak: 4,
+        breakMinutes: 10,
         petRemindersEnabled: true,
       },
       activeSession: null,
@@ -167,9 +167,7 @@ function createMockAyati() {
     startPomodoro: vi.fn().mockResolvedValue({
       settings: {
         focusMinutes: 25,
-        shortBreakMinutes: 5,
-        longBreakMinutes: 15,
-        sessionsUntilLongBreak: 4,
+        breakMinutes: 10,
         petRemindersEnabled: true,
       },
       activeSession: {
@@ -261,8 +259,10 @@ describe('Assistant updates in settings', () => {
     });
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
+    await userEvent.click(await screen.findByText('Reminders'));
     expect(screen.queryByRole('option', { name: "Mishari Rashid al-`Afasy" })).not.toBeInTheDocument();
-    await userEvent.selectOptions(await screen.findByLabelText('Reminder Listen Reciter'), '4');
+    await userEvent.click(await screen.findByRole('combobox', { name: /reminder listen reciter/i }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Abu Bakr Shatri' }));
 
     expect(ayati.updateAyahLensSetting).toHaveBeenNthCalledWith(1, 'recitationId', 4);
     expect(ayati.updateAyahLensSetting).toHaveBeenNthCalledWith(2, 'reciterName', 'Abu Bakr Shatri');
@@ -286,7 +286,9 @@ describe('Assistant updates in settings', () => {
     });
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
-    await userEvent.selectOptions(await screen.findByLabelText('Companion appearance'), 'cosmo');
+    await userEvent.click(await screen.findByText('Companion'));
+    await userEvent.click(await screen.findByRole('combobox', { name: /companion appearance/i }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Cosmo' }));
 
     expect(ayati.updateSettings).toHaveBeenCalledWith('pet.appearanceId', 'cosmo');
   });
@@ -407,22 +409,24 @@ describe('Assistant productivity tabs', () => {
     await userEvent.click(await screen.findByRole('option', { name: 'Islamic Society of North America (ISNA)' }));
     await userEvent.click(screen.getByLabelText('Prayer juristic school'));
     await userEvent.click(await screen.findByRole('option', { name: 'Hanafi' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Save Prayer Settings' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(ayati.updatePrayerSettings).toHaveBeenCalledWith(expect.objectContaining({
       city: 'New York',
       country: 'United States',
       method: 2,
       school: 1,
       hasSavedSettings: true,
+      use24h: true,
     }));
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Save Prayer Settings' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
     });
 
     await userEvent.click(screen.getByRole('tab', { name: 'To Do' }));
     await userEvent.click(screen.getByRole('button', { name: 'Add Task' }));
     await userEvent.type(await screen.findByLabelText('Task title'), 'Read tafsir');
-    await userEvent.click(screen.getByRole('button', { name: 'Add Task' }));
+    const addTaskButtons = screen.getAllByRole('button', { name: 'Add Task' });
+    await userEvent.click(addTaskButtons[addTaskButtons.length - 1]);
     expect(ayati.createTodo).toHaveBeenCalledWith(expect.objectContaining({ title: 'Read tafsir' }));
 
     await userEvent.click(screen.getByRole('tab', { name: 'Focus' }));
@@ -442,6 +446,7 @@ describe('Assistant productivity tabs', () => {
       reminderLeadMinutes: 10,
       quietMinutesAfterPrayer: 15,
       hasSavedSettings: true,
+      use24h: true,
     });
     Object.defineProperty(window, 'ayati', {
       configurable: true,
@@ -453,12 +458,13 @@ describe('Assistant productivity tabs', () => {
     });
 
     expect(await screen.findByRole('tab', { name: 'Prayers' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Save Prayer Settings' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Prayer calculation method')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('tab', { name: 'Settings' }));
-    expect(await screen.findByText('Prayer Awareness')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('London')).toBeInTheDocument();
+    expect(await screen.findByText('Prayer Times')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Prayer Times'));
+    expect(await screen.findByRole('combobox', { name: /prayer country/i })).toHaveTextContent('United Kingdom');
   });
 });
 
@@ -484,7 +490,7 @@ describe('Assistant settings shortcuts', () => {
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
 
-    expect(await screen.findByText('Quran Reminders')).toBeInTheDocument();
+    expect(await screen.findByText('Reminders')).toBeInTheDocument();
     expect(screen.queryByLabelText(/provider/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/api key/i)).not.toBeInTheDocument();
   });
@@ -501,6 +507,7 @@ describe('Assistant settings shortcuts', () => {
     });
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
+    await userEvent.click(await screen.findByText('Shortcuts'));
 
     const openAssistant = await screen.findByText('Open Assistant');
     const hideApp = screen.getByText('Hide App');
@@ -508,7 +515,7 @@ describe('Assistant settings shortcuts', () => {
     expect(screen.queryByText('Open Chat')).not.toBeInTheDocument();
     expect(screen.queryByText('Reflect on Screen')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /change open assistant shortcut, currently ⌘ \+ ⌥ \+ \./i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /change hide app shortcut, currently ⌘ \+ ⌥ \+ ⇧ \+ ,/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /change hide app shortcut, currently ⌘ \+ ⌥ \+ ,/i })).toBeInTheDocument();
   });
 });
 
@@ -529,6 +536,7 @@ describe('Assistant developer settings', () => {
     });
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
+    await userEvent.click(await screen.findByText('Developer'));
 
     expect(await screen.findByRole('button', { name: 'running-right' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'review' })).toBeInTheDocument();
@@ -552,6 +560,7 @@ describe('Assistant developer settings', () => {
     });
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
+    await userEvent.click(await screen.findByText('Developer'));
     await userEvent.click(await screen.findByRole('button', { name: /test reminder comment/i }));
 
     expect(ayati.forceTimedReminderComment).toHaveBeenCalledTimes(1);
@@ -572,6 +581,7 @@ describe('Assistant developer settings', () => {
     });
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
+    await userEvent.click(await screen.findByText('Developer'));
     await userEvent.click(await screen.findByRole('button', { name: /test prayer reminder \(maghrib\)/i }));
 
     expect(ayati.forcePrayerReminderComment).toHaveBeenCalledTimes(1);
@@ -592,6 +602,7 @@ describe('Assistant developer settings', () => {
     });
 
     await userEvent.click(await screen.findByRole('tab', { name: 'Settings' }));
+    await userEvent.click(await screen.findByText('Developer'));
     await userEvent.click(await screen.findByRole('button', { name: /test to do reminder/i }));
 
     expect(ayati.forceTodoReminderComment).toHaveBeenCalledTimes(1);

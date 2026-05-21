@@ -527,12 +527,10 @@ export interface TodoItem {
 }
 export type CreateTodoInput = Pick<TodoItem, 'title'> & Partial<Pick<TodoItem, 'notes' | 'priority' | 'dueAt' | 'reminderAt'>>;
 export type UpdateTodoInput = Partial<Pick<TodoItem, 'title' | 'notes' | 'priority' | 'dueAt' | 'reminderAt'>>;
-export type PomodoroSessionKind = 'focus' | 'shortBreak' | 'longBreak';
+export type PomodoroSessionKind = 'focus' | 'break';
 export interface PomodoroSettings {
   focusMinutes: number;
-  shortBreakMinutes: number;
-  longBreakMinutes: number;
-  sessionsUntilLongBreak: number;
+  breakMinutes: number;
   petRemindersEnabled: boolean;
 }
 export interface PomodoroActiveSession {

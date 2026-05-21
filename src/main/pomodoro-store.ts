@@ -5,8 +5,7 @@ import type { PomodoroSessionKind, PomodoroState } from './ayah-types';
 const MAX_POMODORO_HISTORY = 100;
 
 function durationForKind(state: PomodoroState, kind: PomodoroSessionKind): number {
-  if (kind === 'shortBreak') return state.settings.shortBreakMinutes;
-  if (kind === 'longBreak') return state.settings.longBreakMinutes;
+  if (kind === 'break') return state.settings.breakMinutes;
   return state.settings.focusMinutes;
 }
 
@@ -107,7 +106,6 @@ export function getDuePomodoroCompletion(state: PomodoroState, now: number) {
   return state.activeSession;
 }
 
-export function getNextPomodoroKind(state: PomodoroState): PomodoroSessionKind {
-  const target = Math.max(1, state.settings.sessionsUntilLongBreak);
-  return state.completedFocusCount > 0 && state.completedFocusCount % target === 0 ? 'longBreak' : 'shortBreak';
+export function getNextPomodoroKind(_state: PomodoroState): PomodoroSessionKind {
+  return 'break';
 }

@@ -1,17 +1,6 @@
 # Per-Tab Opportunities
 
 
-## 2. Prayers Tab
-
-| Current | shadcn Component | Benefit |
-| --- | --- | --- |
-| Country/City/Calculation method `<select>`s | Select | Consistent styling, search/filter, better UX |
-| Enable Prayer checkbox | Checkbox or Switch | Polished animation |
-| Number inputs (lead minutes) | Input | Validated, consistent |
-| Save/Section buttons | Button | Variants (primary, secondary, ghost) |
-| Prayer time rows | Card | Hover states, consistent borders |
-| Next Prayer display | Card | Clean container |
-
 ## 3. To Do Tab
 
 | Current | shadcn Component | Benefit |

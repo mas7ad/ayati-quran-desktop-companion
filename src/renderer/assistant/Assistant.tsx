@@ -1,11 +1,18 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { format } from 'date-fns';
+import { SmartDatePicker } from '@/components/ui/smart-date-picker';
+import { cn } from '@/lib/utils';
 import { Icon } from '@iconify/react';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import AnimatedTabs from '@/components/smoothui/animated-tabs';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Textarea } from '@/components/ui/textarea';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+
+import { getTafsirParagraphs } from '../screenshot-question/AyahVerseCard';
 import { QulArabicText } from '../components/QulArabicText';
 import { HotkeyInput } from '../components/HotkeyInput';
 import { SettingsSection } from '../components/SettingsSection';
@@ -20,12 +27,15 @@ import { getClientPomodoroRemainingMs } from '../../shared/pomodoro-client';
 import { getNextPrayer } from '../../shared/prayer-schedule';
 import { filterAvailableRecitationResources } from '../../shared/quran-reciter-preferences';
 import { getAtlasForAppearance, type PetClipId } from '../pet/pet-sprite-atlas';
-import { getTafsirParagraphs } from '../screenshot-question/AyahVerseCard';
+
 import { KeychainConsentModal } from '../components/KeychainConsentModal';
 import { KEYCHAIN_CONSENT_LEDE } from '../../shared/keychain-consent';
 
 type Tab = 'prayers' | 'todos' | 'focus' | 'reflections' | 'settings';
 type UpdateAction = 'check' | 'download' | 'install';
+
+/** Legacy timed-reminder copy; hidden in the reflections list. */
+const LEGACY_TIMED_REMINDER_WHY = 'This reminder was shown on the interval you set.';
 
 const isDevEnvironment = import.meta.env.DEV;
 
@@ -83,6 +93,20 @@ function formatNextPrayerCountdown(ms: number): string {
   return `-${m}:${String(s).padStart(2, '0')}`;
 }
 
+function normalizeTodoItems(value: unknown): TodoItem[] {
+  return Array.isArray(value) ? (value as TodoItem[]) : [];
+}
+
+function formatTodoDate(value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+
+  try {
+    return format(value, 'MMM d');
+  } catch {
+    return null;
+  }
+}
+
 const DEFAULT_PRAYER_DRAFT: PrayerSettings = {
   enabled: false,
   city: '',
@@ -92,7 +116,16 @@ const DEFAULT_PRAYER_DRAFT: PrayerSettings = {
   reminderLeadMinutes: 10,
   quietMinutesAfterPrayer: 15,
   hasSavedSettings: false,
+  use24h: true,
 };
+
+function formatPrayerTime(time: string, use24h: boolean): string {
+  if (use24h) return time;
+  const [h, m] = time.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 || 12;
+  return `${hour}:${String(m).padStart(2, '0')} ${period}`;
+}
 
 const PRAYER_LOCATION_PRESETS = [
   { country: 'United Kingdom', cities: ['London', 'Birmingham', 'Manchester', 'Glasgow', 'Leeds', 'Liverpool', 'Newcastle upon Tyne', 'Sheffield', 'Bristol', 'Belfast', 'Leicester', 'Edinburgh', 'Brighton', 'Bournemouth', 'Cardiff', 'Nottingham', 'Southampton', 'Portsmouth', 'Coventry', 'Bradford'] },
@@ -224,11 +257,26 @@ const PREFERRED_TRANSLATION_ID = 131;
 const PREFERRED_TAFSIR_ID = 169;
 
 type QuranContentListResource = { id: number; name: string; languageName?: string };
-type PomodoroMinuteSettingKey = 'focusMinutes' | 'shortBreakMinutes' | 'longBreakMinutes';
+type PomodoroMinuteSettingKey = 'focusMinutes' | 'breakMinutes';
 
-const SETTINGS_NUMBER_INPUT_CLASS = 'w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all';
+
 
 export const Assistant: React.FC = () => {
+  // #region agent log
+  fetch('http://127.0.0.1:7445/ingest/5150cd8d-c9d2-4c97-b3e9-ffd5b4699b08', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '9312c8' },
+    body: JSON.stringify({
+      sessionId: '9312c8',
+      location: 'Assistant.tsx:render',
+      message: 'Assistant render start',
+      data: { hasAyati: typeof window.ayati !== 'undefined' },
+      hypothesisId: 'B',
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+
   const [activeTab, setActiveTab] = useState<Tab>('prayers');
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [ayahSettings, setAyahSettings] = useState<AyahLensSettings | null>(null);
@@ -236,10 +284,19 @@ export const Assistant: React.FC = () => {
   const [reflections, setReflections] = useState<AyahReflection[]>([]);
   const [collections, setCollections] = useState<AyahCollection[]>([]);
   const [reflectionSearch, setReflectionSearch] = useState('');
-  const [reflectionStatusFilter, setReflectionStatusFilter] = useState<'all' | 'saved' | 'pending'>('all');
-  const [reflectionThemeFilter, setReflectionThemeFilter] = useState<'all' | AyahTheme>('all');
-  const [reflectionFeedbackFilter, setReflectionFeedbackFilter] = useState<'all' | 'relevant' | 'not_relevant'>('all');
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [hiddenTafsirs, setHiddenTafsirs] = useState<Set<string>>(new Set());
+  const setReflectionsWithTafsirDefaultClosed = useCallback((nextReflections: AyahReflection[]) => {
+    setReflections(nextReflections);
+    setHiddenTafsirs((prev) => {
+      const next = new Set(prev);
+      for (const r of nextReflections) {
+        if (r.tafsir?.text?.trim()) next.add(r.id);
+      }
+      return next;
+    });
+  }, []);
+  const [openNoteEditors, setOpenNoteEditors] = useState<Set<string>>(new Set());
   const [prayerSettings, setPrayerSettings] = useState<PrayerSettings | null>(null);
   const [prayerDay, setPrayerDay] = useState<PrayerDay | null>(null);
   const [prayerTomorrow, setPrayerTomorrow] = useState<PrayerDay | null>(null);
@@ -248,14 +305,13 @@ export const Assistant: React.FC = () => {
   const [todoTitle, setTodoTitle] = useState('');
   const [todoNotes, setTodoNotes] = useState('');
   const [todoPriority, setTodoPriority] = useState<TodoPriority>('none');
-  const [todoDueAt, setTodoDueAt] = useState('');
-  const [todoReminderAt, setTodoReminderAt] = useState('');
+  const [todoDueDate, setTodoDueDate] = useState<Date>();
+  const [todoReminderDate, setTodoReminderDate] = useState<Date>();
   const [todoAddDropdownOpen, setTodoAddDropdownOpen] = useState(false);
   const [pomodoroState, setPomodoroState] = useState<PomodoroState | null>(null);
   const [pomodoroSettingsDraft, setPomodoroSettingsDraft] = useState<Record<PomodoroMinuteSettingKey, string>>({
     focusMinutes: '25',
-    shortBreakMinutes: '5',
-    longBreakMinutes: '15',
+    breakMinutes: '10',
   });
   /** Bumps once per second while a session is running so `Date.now()`-based remaining time re-renders. */
   const [pomodoroUiTick, setPomodoroUiTick] = useState(0);
@@ -264,10 +320,45 @@ export const Assistant: React.FC = () => {
   const selectedPetAppearanceId = normalizePetAppearanceId(
     (settings.pet as { appearanceId?: unknown } | undefined)?.appearanceId,
   );
-  const forcedCompanionStates = useMemo(
-    () => Object.keys(getAtlasForAppearance(selectedPetAppearanceId).clips) as PetClipId[],
-    [selectedPetAppearanceId],
-  );
+  const forcedCompanionStates = useMemo(() => {
+    try {
+      const clips = Object.keys(getAtlasForAppearance(selectedPetAppearanceId).clips) as PetClipId[];
+      // #region agent log
+      fetch('http://127.0.0.1:7445/ingest/5150cd8d-c9d2-4c97-b3e9-ffd5b4699b08', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '9312c8' },
+        body: JSON.stringify({
+          sessionId: '9312c8',
+          location: 'Assistant.tsx:atlas',
+          message: 'pet atlas resolved',
+          data: { appearanceId: selectedPetAppearanceId, clipCount: clips.length },
+          hypothesisId: 'D',
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      return clips;
+    } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7445/ingest/5150cd8d-c9d2-4c97-b3e9-ffd5b4699b08', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '9312c8' },
+        body: JSON.stringify({
+          sessionId: '9312c8',
+          location: 'Assistant.tsx:atlas',
+          message: 'pet atlas error',
+          data: {
+            appearanceId: selectedPetAppearanceId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          hypothesisId: 'D',
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      throw error;
+    }
+  }, [selectedPetAppearanceId]);
   const [quranStatusMessage, setQuranStatusMessage] = useState('');
   const [keychainConsentOpen, setKeychainConsentOpen] = useState(false);
   const keychainConsentActionRef = useRef<(() => void | Promise<void>) | null>(null);
@@ -277,6 +368,7 @@ export const Assistant: React.FC = () => {
   const [translationResources, setTranslationResources] = useState<QuranContentListResource[]>([]);
   const [translationLanguageFilter, setTranslationLanguageFilter] = useState<string>(DEFAULT_TRANSLATION_LANGUAGE);
   const todoAddDropdownRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
 
   const switchTab = useCallback((nextTab: Tab) => {
     setActiveTab(nextTab);
@@ -337,13 +429,35 @@ export const Assistant: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const root = document.getElementById('root');
+    const shell = shellRef.current;
+    // #region agent log
+    fetch('http://127.0.0.1:7445/ingest/5150cd8d-c9d2-4c97-b3e9-ffd5b4699b08', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '9312c8' },
+      body: JSON.stringify({
+        sessionId: '9312c8',
+        location: 'Assistant.tsx:layout',
+        message: 'layout dimensions after mount',
+        data: {
+          rootRect: root ? JSON.stringify(root.getBoundingClientRect()) : null,
+          shellRect: shell ? JSON.stringify(shell.getBoundingClientRect()) : null,
+          rootChildCount: root?.childElementCount ?? 0,
+        },
+        hypothesisId: 'C',
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+  }, [activeTab]);
+
+  useEffect(() => {
     if (!pomodoroState?.settings) return;
     setPomodoroSettingsDraft({
       focusMinutes: String(pomodoroState.settings.focusMinutes),
-      shortBreakMinutes: String(pomodoroState.settings.shortBreakMinutes),
-      longBreakMinutes: String(pomodoroState.settings.longBreakMinutes),
+      breakMinutes: String(pomodoroState.settings.breakMinutes),
     });
-  }, [pomodoroState?.settings.focusMinutes, pomodoroState?.settings.shortBreakMinutes, pomodoroState?.settings.longBreakMinutes]);
+  }, [pomodoroState?.settings.focusMinutes, pomodoroState?.settings.breakMinutes]);
 
   useEffect(() => {
     const pomodoroRunning = pomodoroState?.activeSession?.status === 'running';
@@ -355,6 +469,39 @@ export const Assistant: React.FC = () => {
 
   // Initialize
   useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7445/ingest/5150cd8d-c9d2-4c97-b3e9-ffd5b4699b08', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '9312c8' },
+      body: JSON.stringify({
+        sessionId: '9312c8',
+        location: 'Assistant.tsx:init',
+        message: 'init effect start',
+        data: { hasAyati: typeof window.ayati !== 'undefined' },
+        hypothesisId: 'B',
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    if (typeof window.ayati === 'undefined') {
+      // #region agent log
+      fetch('http://127.0.0.1:7445/ingest/5150cd8d-c9d2-4c97-b3e9-ffd5b4699b08', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '9312c8' },
+        body: JSON.stringify({
+          sessionId: '9312c8',
+          location: 'Assistant.tsx:init',
+          message: 'window.ayati missing in init effect',
+          data: {},
+          hypothesisId: 'B',
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      return;
+    }
+
     window.ayati.getSettings().then((s) => {
       setSettings(s as Record<string, unknown>);
     });
@@ -370,7 +517,7 @@ export const Assistant: React.FC = () => {
         setKeychainConsentOpen(true);
       }
     });
-    window.ayati.getAyahReflectionHistory().then(setReflections);
+    window.ayati.getAyahReflectionHistory().then(setReflectionsWithTafsirDefaultClosed);
     window.ayati.getAyahCollections?.().then(setCollections);
     window.ayati.getPrayerSettings?.().then((settings) => {
       setPrayerSettings(settings);
@@ -379,8 +526,8 @@ export const Assistant: React.FC = () => {
     window.ayati.getPrayerTimes?.().then((payload) => {
       applyPrayerTimesPayload(payload ?? null, setPrayerDay, setPrayerTomorrow);
     });
-    window.ayati.getTodos?.().then(setTodos);
-    window.ayati.onTodosUpdated?.(setTodos);
+    window.ayati.getTodos?.().then((nextTodos) => setTodos(normalizeTodoItems(nextTodos)));
+    window.ayati.onTodosUpdated?.((nextTodos) => setTodos(normalizeTodoItems(nextTodos)));
     window.ayati.getPomodoroState?.().then(setPomodoroState);
     window.ayati.getUpdateState().then(setUpdateState);
 
@@ -414,11 +561,11 @@ export const Assistant: React.FC = () => {
 
     window.ayati.onSwitchToReflections?.(() => {
       switchTab('reflections');
-      void window.ayati.getAyahReflectionHistory().then(setReflections);
+      void window.ayati.getAyahReflectionHistory().then(setReflectionsWithTafsirDefaultClosed);
     });
 
     window.ayati.onReflectionsUpdated?.(() => {
-      void window.ayati.getAyahReflectionHistory().then(setReflections);
+      void window.ayati.getAyahReflectionHistory().then(setReflectionsWithTafsirDefaultClosed);
     });
 
     return () => {
@@ -464,27 +611,6 @@ export const Assistant: React.FC = () => {
     setAyahSettings(namedSettings);
   }, [recitationResources]);
 
-  const handleSettingsTafsirSelectChange = useCallback(
-    async (event: React.ChangeEvent<HTMLSelectElement>) => {
-      const raw = event.target.value;
-      if (!raw) {
-        await updateAyahSetting('tafsirResourceId', null);
-        await updateAyahSetting('tafsirResourceName', null);
-        return;
-      }
-      const id = Number(raw);
-      if (!Number.isInteger(id) || id <= 0) return;
-      const resource = tafsirResources.find((r) => r.id === id);
-      await updateAyahSetting('tafsirResourceId', id);
-      if (resource?.name) await updateAyahSetting('tafsirResourceName', resource.name);
-    },
-    [tafsirResources, updateAyahSetting],
-  );
-
-  const handleTranslationLanguageFilterChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
-    setTranslationLanguageFilter(event.target.value);
-  }, []);
-
   const handleUpdateAction = useCallback(async () => {
     if (isUpdateButtonDisabled(updateState)) return;
 
@@ -521,8 +647,9 @@ export const Assistant: React.FC = () => {
   }, [updateState]);
 
   const refreshReflections = useCallback(async () => {
-    setReflections(await window.ayati.getAyahReflectionHistory());
-  }, []);
+    const nextReflections = await window.ayati.getAyahReflectionHistory();
+    setReflectionsWithTafsirDefaultClosed(nextReflections);
+  }, [setReflectionsWithTafsirDefaultClosed]);
 
   const loadReflectionTafsir = useCallback(async (reflectionId: string) => {
     const resourceId = typeof ayahSettings?.tafsirResourceId === 'number' && ayahSettings.tafsirResourceId > 0
@@ -580,22 +707,21 @@ export const Assistant: React.FC = () => {
   const createTodoFromPanel = useCallback(async () => {
     const title = todoTitle.trim();
     if (!title) return;
-    const toTimestamp = (value: string) => (value ? new Date(value).getTime() : null);
     const nextTodos = await window.ayati.createTodo({
       title,
       notes: todoNotes,
       priority: todoPriority,
-      dueAt: toTimestamp(todoDueAt),
-      reminderAt: toTimestamp(todoReminderAt),
+      dueAt: todoDueDate ? todoDueDate.getTime() : null,
+      reminderAt: todoReminderDate ? todoReminderDate.getTime() : null,
     });
-    setTodos(nextTodos);
+    setTodos(normalizeTodoItems(nextTodos));
     setTodoTitle('');
     setTodoNotes('');
     setTodoPriority('none');
-    setTodoDueAt('');
-    setTodoReminderAt('');
+    setTodoDueDate(undefined);
+    setTodoReminderDate(undefined);
     setTodoAddDropdownOpen(false);
-  }, [todoDueAt, todoNotes, todoPriority, todoReminderAt, todoTitle]);
+  }, [todoDueDate, todoNotes, todoPriority, todoReminderDate, todoTitle]);
 
   useEffect(() => {
     if (activeTab !== 'todos') {
@@ -622,12 +748,12 @@ export const Assistant: React.FC = () => {
   }, [todoAddDropdownOpen]);
 
   const completeTodoFromPanel = useCallback(async (todoId: string, completed: boolean) => {
-    setTodos(await window.ayati.completeTodo(todoId, completed));
+    setTodos(normalizeTodoItems(await window.ayati.completeTodo(todoId, completed)));
   }, []);
 
   const deleteTodoFromPanel = useCallback(async (todoId: string) => {
     if (!confirm('Delete this task?')) return;
-    setTodos(await window.ayati.deleteTodo(todoId));
+    setTodos(normalizeTodoItems(await window.ayati.deleteTodo(todoId)));
   }, []);
 
 
@@ -640,7 +766,7 @@ export const Assistant: React.FC = () => {
   }, []);
 
   const commitPomodoroMinuteDraftFromPanel = useCallback((key: PomodoroMinuteSettingKey) => {
-    const fallback = pomodoroState?.settings[key] ?? (key === 'focusMinutes' ? 25 : key === 'shortBreakMinutes' ? 5 : 15);
+    const fallback = pomodoroState?.settings[key] ?? (key === 'focusMinutes' ? 25 : 10);
     const rawValue = pomodoroSettingsDraft[key];
     const nextValue = Number(rawValue);
 
@@ -655,15 +781,13 @@ export const Assistant: React.FC = () => {
   const startPomodoroFromPanel = useCallback(async (kind: PomodoroSessionKind) => {
     const duration = kind === 'focus'
       ? pomodoroState?.settings.focusMinutes
-      : kind === 'shortBreak'
-        ? pomodoroState?.settings.shortBreakMinutes
-        : pomodoroState?.settings.longBreakMinutes;
+      : pomodoroState?.settings.breakMinutes;
     setPomodoroState(await window.ayati.startPomodoro({
       kind,
       durationMinutes: duration,
       todoId: kind === 'focus' && selectedFocusTodoId ? selectedFocusTodoId : null,
     }));
-  }, [pomodoroState?.settings.focusMinutes, pomodoroState?.settings.longBreakMinutes, pomodoroState?.settings.shortBreakMinutes, selectedFocusTodoId]);
+  }, [pomodoroState?.settings.focusMinutes, pomodoroState?.settings.breakMinutes, selectedFocusTodoId]);
 
   const runQuranSignIn = useCallback(async () => {
     try {
@@ -731,26 +855,15 @@ export const Assistant: React.FC = () => {
     window.ayati.closeAssistant();
   }, []);
 
-  const availableThemes = Array.from(
-    new Set(reflections.flatMap((reflection) => reflection.themes.map((theme) => theme.id))),
-  );
   const filteredReflections = reflections.filter((reflection) => {
     const query = reflectionSearch.trim().toLowerCase();
-    const matchesQuery = !query || [
+    return !query || [
       reflection.verseKey,
       reflection.surahName,
       reflection.translation,
       reflection.reflection,
       reflection.note?.body ?? '',
     ].join(' ').toLowerCase().includes(query);
-    const matchesStatus = reflectionStatusFilter === 'all'
-      || (reflectionStatusFilter === 'saved' && Boolean(reflection.savedAt))
-      || (reflectionStatusFilter === 'pending' && (reflection.syncState === 'pending' || reflection.note?.syncState === 'pending'));
-    const matchesTheme = reflectionThemeFilter === 'all'
-      || reflection.themes.some((theme) => theme.id === reflectionThemeFilter);
-    const matchesFeedback = reflectionFeedbackFilter === 'all'
-      || reflection.feedback?.value === reflectionFeedbackFilter;
-    return matchesQuery && matchesStatus && matchesTheme && matchesFeedback;
   });
   const now = Date.now();
   const nextPrayer = prayerDay ? getNextPrayer(prayerDay, now, prayerTomorrow) : null;
@@ -772,13 +885,33 @@ export const Assistant: React.FC = () => {
     : Math.floor((pomodoroRemainingMs % 60000) / 1000);
   const pomodoroDisplay = `${String(pomodoroMinutes).padStart(2, '0')}:${String(pomodoroSeconds).padStart(2, '0')}`;
 
+  // #region agent log
+  fetch('http://127.0.0.1:7445/ingest/5150cd8d-c9d2-4c97-b3e9-ffd5b4699b08', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '9312c8' },
+    body: JSON.stringify({
+      sessionId: '9312c8',
+      location: 'Assistant.tsx:return',
+      message: 'Assistant about to return JSX',
+      data: {
+        activeTab,
+        prayerDraftSaved: currentPrayerDraft.hasSavedSettings,
+        prayerDayCount: prayerDay?.prayers?.length ?? 0,
+        todoCount: todos.length,
+      },
+      hypothesisId: 'C',
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+
   return (
-    <div className="flex flex-col h-screen bg-[#0f0f0f] text-neutral-200 overflow-hidden">
+    <div ref={shellRef} className="dark flex flex-col h-screen bg-[#0f0f0f] text-neutral-200 overflow-hidden">
       {/* Header */}
       <div className="h-12 border-b border-white/5 flex items-center justify-between gap-2 px-4 select-none shrink-0 bg-[#0f0f0f] drag-region">
         <div className="flex items-center min-w-0 flex-1">
           <span className="min-w-0 truncate text-sm font-medium tracking-tight text-white" title={APP_FULL_NAME}>
-            {APP_DISPLAY_NAME}
+            {APP_FULL_NAME}
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0 no-drag">
@@ -787,7 +920,7 @@ export const Assistant: React.FC = () => {
               type="button"
               onClick={handleUpdateAction}
               disabled={isUpdateButtonDisabled(updateState)}
-              className="flex items-center gap-1.5 max-w-[min(200px,42vw)] px-2.5 py-1 rounded-md text-xs font-semibold bg-[#67E0A3] text-[#07120f] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              className="flex items-center gap-1.5 max-w-[min(200px,42vw)] px-2.5 py-1 rounded-xl text-xs font-semibold bg-[#67E0A3] text-[#07120f] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               title={getUpdateStatusLabel(updateState)}
               aria-label={getUpdateButtonLabel(updateState)}
             >
@@ -813,51 +946,699 @@ export const Assistant: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <Tabs
-        value={activeTab}
-        onValueChange={(value) => switchTab(value as Tab)}
-        className="flex min-h-0 flex-1 flex-col gap-0 bg-[#0f0f0f]"
-      >
-        <TabsList
-          variant="line"
-          className="h-auto w-full justify-start overflow-x-auto rounded-none border-b border-white/5 bg-[#0f0f0f] px-2 py-0 text-neutral-500 scrollbar-hide"
-        >
-          <TabsTrigger value="prayers" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
-            Prayers
-          </TabsTrigger>
-          <TabsTrigger value="todos" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
-            To Do
-          </TabsTrigger>
-          <TabsTrigger value="focus" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
-            Focus
-          </TabsTrigger>
-          <TabsTrigger value="reflections" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
-            Reflections
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="h-auto flex-none rounded-none border-0 px-3 py-2.5 text-xs font-medium text-neutral-500 after:bottom-0 after:bg-[#67E0A3] hover:text-neutral-300 data-active:text-[#67E0A3]">
-            Settings
-          </TabsTrigger>
-        </TabsList>
+      <div className="flex min-h-0 flex-1 flex-col gap-0 bg-[#0f0f0f]">
+        <AnimatedTabs
+          tabs={[
+            { id: 'prayers', label: 'Prayers' },
+            { id: 'todos', label: 'To Do' },
+            { id: 'focus', label: 'Focus' },
+            { id: 'reflections', label: 'Reflections' },
+            { id: 'settings', label: 'Settings' },
+          ]}
+          activeTab={activeTab}
+          onChange={(tabId) => switchTab(tabId as Tab)}
+          variant="underline"
+          className="w-full shrink-0 justify-between border-b border-white/5 bg-[#0f0f0f] px-2 text-neutral-500 [&_button]:h-auto [&_button]:flex-1 [&_button]:border-0 [&_button]:px-3 [&_button]:py-2.5 [&_button]:text-xs [&_button]:font-medium [&_button]:text-neutral-500 [&_button]:hover:text-neutral-300 [&_button[aria-selected=true]]:text-[#67E0A3] [&_button]:focus-visible:border-[#67E0A3] [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-[#67E0A3]/40 [&_button]:focus-visible:ring-offset-0"
+        />
 
-      <TabsContent value="prayers" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
-          {activeTab === 'prayers' && (
-        <div className="flex-1 overflow-y-auto px-3 pt-3 pb-0 space-y-2.5 scrollbar-hide">
-          {!currentPrayerDraft.hasSavedSettings && (
-            <section className="border border-white/10 rounded-md p-3 bg-white/[0.03]">
+        {activeTab === 'prayers' && (
+          <div className={cn('flex flex-1 flex-col min-h-0 px-5 py-5', currentPrayerDraft.hasSavedSettings ? 'overflow-hidden' : 'overflow-y-auto scrollbar-hide')}>
+            {!currentPrayerDraft.hasSavedSettings && (
+              <div className="space-y-4">
+                <h3 className="text-xs font-medium text-neutral-300 uppercase tracking-widest">Prayer Setup</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <span className="block text-xs text-neutral-500">Country</span>
+                    <Select
+                      value={currentPrayerDraft.country}
+                      onValueChange={(country) => {
+                        const firstCity = PRAYER_LOCATION_PRESETS.find((preset) => preset.country === country)?.cities[0] ?? '';
+                        setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), country, city: firstCity }));
+                      }}
+                    >
+                      <SelectTrigger aria-label="Prayer country" className="w-full border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0">
+                        <SelectValue placeholder="Select country" />
+                      </SelectTrigger>
+                      <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                        {prayerCountryOptions.map((country) => (
+                          <SelectItem key={country} value={country}>{country}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="block text-xs text-neutral-500">City</span>
+                    <Select
+                      value={currentPrayerDraft.city}
+                      onValueChange={(city) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), city }))}
+                    >
+                      <SelectTrigger aria-label="Prayer city" className="w-full border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0">
+                        <SelectValue placeholder="Select city" />
+                      </SelectTrigger>
+                      <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                        {prayerCityOptions.map((city) => (
+                          <SelectItem key={city} value={city}>{city}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 pt-2">
+                    <span className="text-sm text-neutral-300">Prayer Awareness</span>
+                    <Switch
+                      aria-label="Enable Prayer Awareness"
+                      checked={currentPrayerDraft.enabled}
+                      onCheckedChange={(enabled) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), enabled }))}
+                      className="data-[state=checked]:bg-[#67E0A3]"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="block text-xs text-neutral-500">Lead (min)</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={120}
+                      value={currentPrayerDraft.reminderLeadMinutes}
+                      onChange={(event) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), reminderLeadMinutes: Number(event.target.value) }))}
+                      className="border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="block text-xs text-neutral-500">Calculation</span>
+                    <Select
+                      value={String(currentPrayerDraft.method)}
+                      onValueChange={(value) => {
+                        const method = Number(value);
+                        setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), method }));
+                        persistPrayerCalculationFromDraft({ method });
+                      }}
+                    >
+                      <SelectTrigger aria-label="Prayer calculation method" className="w-full border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                        {PRAYER_CALCULATION_METHODS.map((method) => (
+                          <SelectItem key={method.id} value={String(method.id)}>{method.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-neutral-600 mt-1 leading-snug" role="note">{PRAYER_CALCULATION_METHOD_UK_NOTE}</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="block text-xs text-neutral-500">Juristic School</span>
+                    <Select
+                      value={String(currentPrayerDraft.school)}
+                      onValueChange={(value) => {
+                        const school = Number(value) as 0 | 1;
+                        setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), school }));
+                        persistPrayerCalculationFromDraft({ school });
+                      }}
+                    >
+                      <SelectTrigger aria-label="Prayer juristic school" className="w-full border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                        {PRAYER_JURISTIC_SCHOOLS.map((school) => (
+                          <SelectItem key={school.id} value={String(school.id)}>{school.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  onClick={savePrayerSettings}
+                  className="w-full bg-[#67E0A3] text-[#07120f] hover:bg-[#67E0A3]/90"
+                  size="sm"
+                >
+                  Save
+                </Button>
+              </div>
+            )}
+
+            <section className="flex min-h-0 flex-1 flex-col">
+              <div className="shrink-0 flex items-center justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-xs text-neutral-500">Next Prayer</p>
+                  <h3 className="truncate text-lg font-semibold text-white">
+                    {nextPrayer
+                      ? `${nextPrayer.label}${nextPrayerIsTomorrow ? ' (tomorrow)' : ''}`
+                      : 'No upcoming prayer loaded'}
+                  </h3>
+                </div>
+                {nextPrayer && (
+                  <p
+                    className="shrink-0 text-sm text-neutral-400 tabular-nums"
+                    aria-label={`${formatNextPrayerCountdown(nextPrayer.at - now)} until ${nextPrayer.label}`}
+                  >
+                    {formatNextPrayerCountdown(nextPrayer.at - now)}
+                  </p>
+                )}
+                {prayerDay?.error && <p className="text-xs text-amber-300">{prayerDay.error}</p>}
+              </div>
+
+              <div className="flex min-h-0 flex-1 flex-col border-t border-neutral-900 pt-1">
+                {(prayerDay?.prayers ?? []).map((prayer) => (
+                  <div
+                    key={prayer.name}
+                    className="flex flex-1 items-center justify-between border-b border-neutral-900 last:border-0"
+                  >
+                    <span className="text-sm text-foreground">{prayer.label}</span>
+                    <span className="text-sm text-[#67E0A3] tabular-nums">{formatPrayerTime(prayer.time, prayerSettings?.use24h ?? true)}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {activeTab === 'todos' && (
+<div className="flex-1 overflow-y-auto px-5 py-5 space-y-5 scrollbar-hide">
+          <Collapsible
+            open={todoAddDropdownOpen}
+            onOpenChange={setTodoAddDropdownOpen}
+            className="relative"
+            ref={todoAddDropdownRef}
+          >
+            <CollapsibleTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full border-dashed border-neutral-700/50 text-neutral-400 hover:text-[#67E0A3] hover:border-[#67E0A3]/40 bg-transparent"
+              >
+                Add Task
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <section
+                id="todo-add-form-panel"
+                aria-label="Add task"
+                className="mt-3 space-y-3"
+              >
+                <Input
+                  aria-label="Task title"
+                  value={todoTitle}
+                  onChange={(event) => setTodoTitle(event.target.value)}
+                  placeholder="What do you need to do?"
+                  className="border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
+                />
+                <Input
+                  aria-label="Task notes"
+                  value={todoNotes}
+                  onChange={(event) => setTodoNotes(event.target.value)}
+                  placeholder="Notes"
+                  className="border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
+                />
+                <div className="flex items-center gap-4">
+                  <Select
+                    value={todoPriority}
+                    onValueChange={(value: TodoPriority) => setTodoPriority(value)}
+                  >
+                    <SelectTrigger aria-label="Task priority" className="h-7 w-[90px] border-neutral-800 bg-transparent text-xs text-muted-foreground focus-visible:ring-0">
+                      <SelectValue placeholder="Priority" />
+                    </SelectTrigger>
+                    <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <SmartDatePicker
+                    value={todoDueDate}
+                    onChange={setTodoDueDate}
+                    placeholder="Due"
+                  />
+                  <SmartDatePicker
+                    value={todoReminderDate}
+                    onChange={setTodoReminderDate}
+                    placeholder="Remind"
+                    popoverAlign="end"
+                  />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    type="button"
+                    onClick={createTodoFromPanel}
+                    size="sm"
+                    className="flex-1 bg-[#67E0A3] text-[#07120f] hover:bg-[#67E0A3]/90 text-xs"
+                  >
+                    Add Task
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setTodoAddDropdownOpen(false)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </section>
+            </CollapsibleContent>
+          </Collapsible>
+
+          <section className="space-y-0.5">
+            {incompleteTodos.length === 0 && completedTodos.length === 0 && (
+              <p className="text-xs text-neutral-600 text-center pt-8">No tasks yet. Tap + to add one.</p>
+            )}
+            {incompleteTodos.map((todo) => (
+              <div
+                key={todo.id}
+                className="group flex items-start gap-2.5 py-2.5 border-b border-neutral-900 last:border-0"
+              >
+                <Checkbox
+                  checked={false}
+                  onCheckedChange={() => completeTodoFromPanel(todo.id, true)}
+                  className="mt-0.5 data-checked:bg-[#67E0A3] data-checked:border-[#67E0A3]"
+                />
+                <div className="flex-1 min-w-0">
+                  <span className="block text-sm text-foreground leading-snug">{todo.title}</span>
+                  {todo.notes && (
+                    <span className="block text-xs text-neutral-600 mt-0.5 line-clamp-1">{todo.notes}</span>
+                  )}
+                  {(todo.priority !== 'none' || formatTodoDate(todo.dueAt) || todo.reminderAt) && (
+                    <div className="flex items-center gap-2 mt-1">
+                      {todo.priority !== 'none' && (
+                        <span className={`text-[10px] uppercase tracking-wider ${
+                          todo.priority === 'high' ? 'text-red-400' :
+                          todo.priority === 'medium' ? 'text-amber-400' :
+                          'text-neutral-500'
+                        }`}>{todo.priority}</span>
+                      )}
+                      {formatTodoDate(todo.dueAt) && (
+                        <span className="text-[10px] text-neutral-500">
+                          {formatTodoDate(todo.dueAt)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => deleteTodoFromPanel(todo.id)}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-neutral-600 hover:text-red-400 hover:bg-transparent -mr-1 -mt-0.5"
+                >
+                  <Icon icon="solar:close-circle-linear" width="14" height="14" />
+                </Button>
+              </div>
+            ))}
+          </section>
+
+          {completedTodos.length > 0 && (
+            <>
+              <div className="border-t border-neutral-900 pt-4 space-y-0.5">
+                {completedTodos.map((todo) => (
+                  <div
+                    key={todo.id}
+                    className="group flex items-start gap-2.5 py-2"
+                  >
+                    <Checkbox
+                      checked
+                      onCheckedChange={() => completeTodoFromPanel(todo.id, false)}
+                      className="mt-0.5 data-checked:bg-neutral-600 data-checked:border-neutral-600"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <span className="block text-sm text-neutral-600 line-through leading-snug">{todo.title}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => deleteTodoFromPanel(todo.id)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-neutral-600 hover:text-red-400 hover:bg-transparent -mr-1 -mt-0.5"
+                    >
+                      <Icon icon="solar:close-circle-linear" width="14" height="14" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+        {activeTab === 'focus' && (
+        <div className="flex-1 flex flex-col px-5 py-4 gap-0 min-h-0">
+          {/* Session label & status */}
+          <div className="flex items-center justify-between shrink-0">
+            <span className="text-xs text-neutral-500 capitalize">{pomodoroState?.activeSession?.kind ?? 'focus'}</span>
+            <span className="text-xs text-neutral-600">
+              {pomodoroState?.activeSession?.status === 'running'
+                ? 'Running'
+                : pomodoroState?.activeSession?.status === 'paused'
+                  ? 'Paused'
+                  : 'Idle'}
+            </span>
+          </div>
+
+          {/* Timer — absorbs remaining space */}
+          <div className="flex-1 flex items-center justify-center min-h-0">
+            <h3 className="text-6xl font-light tabular-nums tracking-tight text-white">{pomodoroDisplay}</h3>
+          </div>
+
+          {/* Controls section — fixed height */}
+          <div className="shrink-0 flex flex-col gap-3">
+            {/* Linked task — block wrapper so trigger spans same width as inputs/buttons below */}
+            <label className="block w-full min-w-0">
+              <Select value={selectedFocusTodoId || 'none'} onValueChange={(value) => setSelectedFocusTodoId(value === 'none' ? '' : value)}>
+                <SelectTrigger aria-label="Focus task" className="h-8 w-full border-neutral-800 bg-transparent text-sm text-muted-foreground focus-visible:ring-0">
+                  <SelectValue placeholder="No linked task" />
+                </SelectTrigger>
+                <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                  <SelectItem value="none">No linked task</SelectItem>
+                  {incompleteTodos.map((todo) => <SelectItem key={todo.id} value={todo.id}>{todo.title}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </label>
+
+            {/* Duration inputs */}
+            <div className="grid grid-cols-2 gap-4">
+              <label className="block text-[11px] text-neutral-500">
+                Focus
+                <Input
+                  type="number"
+                  min={1}
+                  max={240}
+                  value={pomodoroSettingsDraft.focusMinutes}
+                  onChange={(event) => updatePomodoroMinuteDraftFromPanel('focusMinutes', event.target.value)}
+                  onBlur={() => commitPomodoroMinuteDraftFromPanel('focusMinutes')}
+                  className="mt-1.5 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1 h-auto text-sm text-foreground tabular-nums focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
+                />
+              </label>
+              <label className="block text-[11px] text-neutral-500">
+                Break
+                <Input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={pomodoroSettingsDraft.breakMinutes}
+                  onChange={(event) => updatePomodoroMinuteDraftFromPanel('breakMinutes', event.target.value)}
+                  onBlur={() => commitPomodoroMinuteDraftFromPanel('breakMinutes')}
+                  className="mt-1.5 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1 h-auto text-sm text-foreground tabular-nums focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
+                />
+              </label>
+            </div>
+
+            {/* Action buttons */}
+            <div className="grid grid-cols-[9fr_9fr_2fr] gap-2">
+              {!pomodoroState?.activeSession || pomodoroState.activeSession.status === 'completed' || pomodoroState.activeSession.status === 'cancelled' ? (
+                <Button size="sm" onClick={() => startPomodoroFromPanel('focus')} className="bg-[#67E0A3] text-[#07120f] hover:bg-[#67E0A3]/80">Start Focus</Button>
+              ) : pomodoroState.activeSession.status === 'running' ? (
+                <Button variant="outline" size="sm" onClick={async () => setPomodoroState(await window.ayati.pausePomodoro())} className="border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-600 bg-transparent">Pause</Button>
+              ) : (
+                <Button size="sm" onClick={async () => setPomodoroState(await window.ayati.resumePomodoro())} className="bg-[#67E0A3] text-[#07120f] hover:bg-[#67E0A3]/80">Resume</Button>
+              )}
+              <Button variant="outline" size="sm" onClick={() => startPomodoroFromPanel('break')} className="border-neutral-800 text-neutral-400 hover:text-[#67E0A3] hover:border-[#67E0A3]/40 bg-transparent">Start Break</Button>
+              <Button variant="ghost" size="xs" onClick={async () => setPomodoroState(await window.ayati.cancelPomodoro())} className="text-neutral-600 hover:text-red-400 hover:bg-transparent self-center">Cancel</Button>
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="border-t border-neutral-900 pt-3 mt-4 shrink-0">
+            <p className="text-xs text-neutral-600">Completed focus sessions: {pomodoroState?.completedFocusCount ?? 0}</p>
+          </div>
+        </div>
+      )}
+
+      {/* CONTENT: Reflections */}
+        {activeTab === 'reflections' && (
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5 scrollbar-hide">
+
+          {quranStatusMessage && (
+            <div className="text-xs text-[#67E0A3] bg-[#67E0A3]/10 border border-[#67E0A3]/25 rounded-md px-3 py-2">
+              {quranStatusMessage}
+            </div>
+          )}
+
+          <Input
+            type="search"
+            aria-label="Search reflections"
+            value={reflectionSearch}
+            onChange={(event) => setReflectionSearch(event.target.value)}
+            placeholder="Search reflections..."
+            className="border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1.5 h-auto text-sm text-foreground placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
+          />
+
+
+
+          {reflections.length === 0 ? (
+            <p className="text-xs text-neutral-600 text-center pt-8">
+              No reflections yet. Capture your screen to receive a Quran-focused reminder.
+            </p>
+          ) : (
+            <section className="space-y-0.5">
+              {filteredReflections.map((reflection) => (
+                <div key={reflection.id} className="group border-b border-neutral-900 last:border-0 py-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-medium text-[#67E0A3]">
+                      {reflection.surahName} {reflection.verseKey}
+                    </span>
+                    <span className="text-[10px] text-neutral-600">
+                      {reflection.syncState}
+                    </span>
+                  </div>
+
+                  <QulArabicText
+                    verseKey={reflection.verseKey}
+                    fallbackText={reflection.arabicText}
+                    className="text-right text-white/90"
+                    variant="assistant"
+                    qulSettingsKey={ayahQulSettingsKey}
+                  />
+
+                  <p translate="no" className="text-sm leading-relaxed text-neutral-200">
+                    {reflection.translation}
+                  </p>
+
+                  {reflection.whyThisVerse
+                    && reflection.whyThisVerse !== LEGACY_TIMED_REMINDER_WHY && (
+                    <p className="text-xs leading-relaxed text-neutral-500">
+                      {reflection.whyThisVerse}
+                    </p>
+                  )}
+
+                  {reflection.tafsir?.text?.trim() && !hiddenTafsirs.has(reflection.id) && (
+                    <div className="space-y-1.5 border-l border-neutral-700 pl-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-neutral-500">Tafsir</span>
+                        {reflection.tafsir.resourceName && (
+                          <span className="text-[10px] text-neutral-600">{reflection.tafsir.resourceName}</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setHiddenTafsirs((prev) => new Set(prev).add(reflection.id))}
+                          className="ml-auto text-neutral-600 hover:text-neutral-400 transition-colors"
+                          aria-label="Hide tafsir"
+                        >
+                          <Icon icon="lucide:x" width="12" height="12" />
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        {getTafsirParagraphs(reflection.tafsir.text).map((paragraph, index) => (
+                          <p
+                            key={`${reflection.id}-tafsir-${index}`}
+                            className="text-xs leading-relaxed text-neutral-500"
+                            translate="no"
+                          >
+                            {paragraph}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {collections.length > 0 && (
+                    <Select
+                      defaultValue=""
+                      onValueChange={(value) => {
+                        if (value) void addReflectionToCollectionFromPanel(reflection.id, value);
+                      }}
+                    >
+                      <SelectTrigger aria-label={`Collection for ${reflection.verseKey}`} className="h-7 border-neutral-800 bg-transparent text-xs text-muted-foreground">
+                        <SelectValue placeholder="Save to collection…" />
+                      </SelectTrigger>
+                      <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                        {collections.map((collection) => (
+                          <SelectItem key={collection.id} value={collection.id}>{collection.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+
+                  <div className="flex items-center gap-2 -ml-2">
+                    <Button variant="ghost" size="xs" onClick={() => {
+                      if (!reflection.tafsir?.text?.trim()) {
+                        loadReflectionTafsir(reflection.id);
+                        setHiddenTafsirs((prev) => new Set(prev).add(reflection.id));
+                      } else if (hiddenTafsirs.has(reflection.id)) {
+                        setHiddenTafsirs((prev) => { const next = new Set(prev); next.delete(reflection.id); return next; });
+                      } else {
+                        setHiddenTafsirs((prev) => new Set(prev).add(reflection.id));
+                      }
+                    }} className="text-neutral-600 hover:text-[#67E0A3]">
+                      <Icon icon="lucide:book-open" width="11" height="11" className="mr-1" />
+                      Tafsir
+                    </Button>
+                    <Button variant="ghost" size="xs" onClick={() => loadReflectionAudio(reflection.id)} className="text-neutral-600 hover:text-[#67E0A3]">
+                      <Icon icon="lucide:play" width="11" height="11" className="mr-1" />
+                      Recite
+                    </Button>
+                    <Button variant="ghost" size="xs" onClick={() => { if (!openNoteEditors.has(reflection.id)) { setOpenNoteEditors((prev) => new Set(prev).add(reflection.id)); } else { setOpenNoteEditors((prev) => { const next = new Set(prev); next.delete(reflection.id); return next; }); } }} className="text-neutral-600 hover:text-[#67E0A3]">
+                      <Icon icon="lucide:sticky-note" width="11" height="11" className="mr-1" />
+                      Note
+                    </Button>
+                    <Button variant="ghost" size="xs" onClick={async () => {
+                        await window.ayati.deleteAyahReflection(reflection.id);
+                        await refreshReflections();
+                      }} className="text-neutral-600 hover:text-red-400 ml-auto">
+                      <Icon icon="lucide:trash-2" width="11" height="11" className="mr-1" />
+                      Delete
+                    </Button>
+                  </div>
+
+                  {(reflection.note?.body || openNoteEditors.has(reflection.id)) && (
+                    <Textarea
+                      aria-label={`Note for ${reflection.verseKey}`}
+                      value={noteDrafts[reflection.id] ?? reflection.note?.body ?? ''}
+                      onChange={(event) => setNoteDrafts((current) => ({ ...current, [reflection.id]: event.target.value }))}
+                      placeholder="Add a short note..."
+                      className="border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1 h-auto min-h-0 text-xs text-foreground placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
+                      rows={1}
+                    />
+                  )}
+                </div>
+              ))}
+              {filteredReflections.length === 0 && (
+                <p className="text-xs text-neutral-600 text-center pt-8">No reflections match these filters.</p>
+              )}
+            </section>
+          )}
+        </div>
+      )}
+
+      {/* CONTENT: Settings */}
+        {activeTab === 'settings' && (
+        <div className="flex-1 flex flex-col overflow-y-auto px-5 py-4 space-y-3 scrollbar-hide">
+          <SettingsSection title="Reminders">
+            <div className="space-y-3">
+              <label className="flex items-center justify-between cursor-pointer group">
+                <div className="flex flex-col">
+                  <span className="text-sm">
+                    Timer Quran Reminders
+                  </span>
+                  <span className="text-[11px] text-neutral-600 mt-px">
+                    Show a Quran reminder on the interval you choose
+                  </span>
+                </div>
+                <Switch
+                  checked={ayahSettings?.timedReminders ?? false}
+                  onCheckedChange={(checked) => updateAyahSetting('timedReminders', checked)}
+                  className="data-[state=unchecked]:bg-neutral-700 data-[state=checked]:bg-[#67E0A3]"
+                />
+              </label>
+
+              <label className="flex items-center justify-between cursor-pointer group">
+                <div className="flex flex-col">
+                  <span className="text-sm">
+                    App Switch Quran Nudges
+                  </span>
+                  <span className="text-[11px] text-neutral-600 mt-px">
+                    Show Quran-linked reminders only when app context is clear
+                  </span>
+                </div>
+                <Switch
+                  checked={ayahSettings?.contextualNudges ?? true}
+                  onCheckedChange={(checked) => updateAyahSetting('contextualNudges', checked)}
+                  className="data-[state=unchecked]:bg-neutral-700 data-[state=checked]:bg-[#67E0A3]"
+                />
+              </label>
+
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Country</span>
+                  <span className="block text-[11px] text-neutral-600 mb-1">Timer</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={ayahSettings?.timedReminderMinutes ?? 15}
+                    onChange={(event) => updateAyahSetting('timedReminderMinutes', Number(event.target.value))}
+                    className="border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1 h-auto text-sm placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-[11px] text-neutral-600 mb-1">Cooldown</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={240}
+                    value={ayahSettings?.nudgeCooldownMinutes ?? 15}
+                    onChange={(event) => updateAyahSetting('nudgeCooldownMinutes', Number(event.target.value))}
+                    className="border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1 h-auto text-sm placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
+                  />
+                </label>
+              </div>
+              <label className="block">
+                <span className="block text-[11px] text-neutral-600 mb-1">Reciter</span>
+                <Select
+                  value={String(ayahSettings?.recitationId ?? '')}
+                  onValueChange={(value) => updateReminderListenReciter(value)}
+                  disabled={recitationResources.length === 0}
+                >
+                  <SelectTrigger aria-label="Reminder Listen Reciter" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0 disabled:opacity-60">
+                    <SelectValue placeholder={recitationResources.length === 0 ? 'Loading reciters' : 'Choose reciter'} />
+                  </SelectTrigger>
+                  <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                    {recitationResources.map((resource) => (
+                      <SelectItem key={resource.id} value={String(resource.id)}>{resource.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="mt-0.5 block text-[11px] text-neutral-600">
+                  Used when you press Listen on Quran reminder cards.
+                </span>
+              </label>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection title="Prayer Times">
+            <div className="space-y-3">
+              <label className="flex items-center justify-between cursor-pointer group">
+                <div className="flex flex-col">
+                  <span className="text-sm">Enable Prayer Awareness</span>
+                  <span className="text-[11px] text-neutral-600 mt-px">Show prayer schedule and pet reminders</span>
+                </div>
+                <Switch
+                  checked={prayerSettings?.enabled ?? false}
+                  onCheckedChange={(checked) => updatePrayerSettingsFromSettings({ enabled: checked })}
+                  className="data-[state=unchecked]:bg-neutral-700 data-[state=checked]:bg-[#67E0A3]"
+                />
+              </label>
+              <label className="flex items-center justify-between cursor-pointer group">
+                <div className="flex flex-col">
+                  <span className="text-sm">24h Time</span>
+                  <span className="text-[11px] text-neutral-600 mt-px">Show prayer times in 24-hour format</span>
+                </div>
+                <Switch
+                  checked={prayerSettings?.use24h ?? true}
+                  onCheckedChange={(checked) => updatePrayerSettingsFromSettings({ use24h: checked })}
+                  className="data-[state=unchecked]:bg-neutral-700 data-[state=checked]:bg-[#67E0A3]"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="block text-[11px] text-neutral-600 mb-1">Country</span>
                   <Select
                     value={currentPrayerDraft.country}
                     onValueChange={(country) => {
                       const firstCity = PRAYER_LOCATION_PRESETS.find((preset) => preset.country === country)?.cities[0] ?? '';
-                      setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), country, city: firstCity }));
+                      updatePrayerSettingsFromSettings({ country, city: firstCity });
                     }}
                   >
-                    <SelectTrigger aria-label="Prayer country" className="w-full border-white/10 bg-[#0a0a0a] text-neutral-200 focus-visible:border-[#67E0A3] focus-visible:ring-[#67E0A3]/30">
+                    <SelectTrigger aria-label="Prayer country" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0">
                       <SelectValue placeholder="Select country" />
                     </SelectTrigger>
-                    <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                    <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
                       {prayerCountryOptions.map((country) => (
                         <SelectItem key={country} value={country}>{country}</SelectItem>
                       ))}
@@ -865,736 +1646,111 @@ export const Assistant: React.FC = () => {
                   </Select>
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">City</span>
+                  <span className="block text-[11px] text-neutral-600 mb-1">City</span>
                   <Select
                     value={currentPrayerDraft.city}
-                    onValueChange={(city) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), city }))}
+                    onValueChange={(city) => updatePrayerSettingsFromSettings({ city })}
                   >
-                    <SelectTrigger aria-label="Prayer city" className="w-full border-white/10 bg-[#0a0a0a] text-neutral-200 focus-visible:border-[#67E0A3] focus-visible:ring-[#67E0A3]/30">
+                    <SelectTrigger aria-label="Prayer city" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0">
                       <SelectValue placeholder="Select city" />
                     </SelectTrigger>
-                    <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
+                    <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
                       {prayerCityOptions.map((city) => (
                         <SelectItem key={city} value={city}>{city}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </label>
-                <label className="flex items-center gap-2 text-sm text-neutral-300">
-                  <Switch
-                    checked={currentPrayerDraft.enabled}
-                    onCheckedChange={(enabled) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), enabled }))}
-                    className="data-checked:bg-[#67E0A3]"
-                  />
-                  Enable Prayer Awareness
-                </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Reminder Lead Minutes</span>
+                  <span className="block text-[11px] text-neutral-600 mb-1">Lead</span>
                   <Input
-                    type="number"
-                    min={0}
-                    max={120}
-                    value={currentPrayerDraft.reminderLeadMinutes}
-                    onChange={(event) => setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), reminderLeadMinutes: Number(event.target.value) }))}
-                    className="border-white/10 bg-[#0a0a0a] text-neutral-200 focus-visible:border-[#67E0A3] focus-visible:ring-[#67E0A3]/30"
-                  />
-                </label>
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Calculation Method</span>
-                  <Select
-                    value={String(currentPrayerDraft.method)}
-                    onValueChange={(value) => {
-                      const method = Number(value);
-                      setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), method }));
-                      persistPrayerCalculationFromDraft({ method });
-                    }}
-                  >
-                    <SelectTrigger aria-label="Prayer calculation method" className="w-full border-white/10 bg-[#0a0a0a] text-neutral-200 focus-visible:border-[#67E0A3] focus-visible:ring-[#67E0A3]/30">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
-                      {PRAYER_CALCULATION_METHODS.map((method) => (
-                        <SelectItem key={method.id} value={String(method.id)}>{method.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[11px] text-neutral-500 mt-1.5 leading-snug" role="note">{PRAYER_CALCULATION_METHOD_UK_NOTE}</p>
-                </label>
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Juristic School</span>
-                  <Select
-                    value={String(currentPrayerDraft.school)}
-                    onValueChange={(value) => {
-                      const school = Number(value) as 0 | 1;
-                      setPrayerDraft((current) => ({ ...(current ?? currentPrayerDraft), school }));
-                      persistPrayerCalculationFromDraft({ school });
-                    }}
-                  >
-                    <SelectTrigger aria-label="Prayer juristic school" className="w-full border-white/10 bg-[#0a0a0a] text-neutral-200 focus-visible:border-[#67E0A3] focus-visible:ring-[#67E0A3]/30">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="border border-white/10 bg-[#101010] text-neutral-200">
-                      {PRAYER_JURISTIC_SCHOOLS.map((school) => (
-                        <SelectItem key={school.id} value={String(school.id)}>{school.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
-              </div>
-              <Button
-                type="button"
-                onClick={savePrayerSettings}
-                className="mt-3 w-full bg-[#67E0A3] text-[#07120f] hover:bg-[#67E0A3]/90"
-                size="sm"
-              >
-                Save Prayer Settings
-              </Button>
-            </section>
-          )}
-
-          <Card className="ring-0 gap-0 border border-white/10 rounded-md px-4 py-3 bg-white/[0.03] shadow-none">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs text-neutral-500">Next Prayer</p>
-                <h3 className="truncate text-lg font-semibold text-white">
-                  {nextPrayer
-                    ? `${nextPrayer.label}${nextPrayerIsTomorrow ? ' (tomorrow)' : ''}`
-                    : 'No upcoming prayer loaded'}
-                </h3>
-              </div>
-              {nextPrayer && (
-                <p
-                  className="shrink-0 text-sm text-neutral-400 tabular-nums"
-                  aria-label={`${formatNextPrayerCountdown(nextPrayer.at - now)} until ${nextPrayer.label}`}
-                >
-                  {formatNextPrayerCountdown(nextPrayer.at - now)}
-                </p>
-              )}
-            </div>
-            {prayerDay?.error && <p className="mt-1 text-xs text-amber-300">{prayerDay.error}</p>}
-          </Card>
-
-          <div className="space-y-2">
-            {(prayerDay?.prayers ?? []).map((prayer) => (
-              <Card key={prayer.name} className="ring-0 gap-0 flex-row items-center justify-between border border-white/10 rounded-md px-3 py-2.5 bg-white/[0.03] shadow-none" size="sm">
-                <span className="text-sm text-neutral-200">{prayer.label}</span>
-                <span className="text-sm text-[#67E0A3] tabular-nums">{prayer.time}</span>
-              </Card>
-            ))}
-          </div>
-        </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="todos" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
-          {activeTab === 'todos' && (
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
-          <div className="relative" ref={todoAddDropdownRef}>
-            {!todoAddDropdownOpen ? (
-              <button
-                type="button"
-                aria-expanded={false}
-                aria-controls="todo-add-form-panel"
-                aria-haspopup="dialog"
-                onClick={() => setTodoAddDropdownOpen(true)}
-                className="w-full px-3 py-2 bg-[#67E0A3] text-[#07120f] rounded-md text-xs font-semibold"
-              >
-                Add Task
-              </button>
-            ) : (
-              <section
-                id="todo-add-form-panel"
-                role="dialog"
-                aria-label="Add task"
-                className="rounded-md bg-[#67E0A3] p-3 space-y-2 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.45)] border border-[#07120f]/15"
-              >
-                <input
-                  aria-label="Task title"
-                  value={todoTitle}
-                  onChange={(event) => setTodoTitle(event.target.value)}
-                  placeholder="Task title"
-                  className="w-full bg-[#0a0a0a] border border-[#07120f]/25 rounded-md px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-500 outline-none focus:border-[#07120f]/50 focus:ring-1 focus:ring-[#07120f]/30"
-                />
-                <textarea
-                  aria-label="Task notes"
-                  value={todoNotes}
-                  onChange={(event) => setTodoNotes(event.target.value)}
-                  placeholder="Notes"
-                  rows={2}
-                  className="w-full bg-[#0a0a0a] border border-[#07120f]/25 rounded-md px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-500 outline-none focus:border-[#07120f]/50 focus:ring-1 focus:ring-[#07120f]/30"
-                />
-                <div className="grid grid-cols-3 gap-2">
-                  <select
-                    aria-label="Task priority"
-                    value={todoPriority}
-                    onChange={(event) => setTodoPriority(event.target.value as TodoPriority)}
-                    className="bg-[#0a0a0a] border border-[#07120f]/25 rounded-md px-2 py-2 text-xs text-neutral-300 outline-none focus:border-[#07120f]/50"
-                  >
-                    <option value="none">No Priority</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                  <input aria-label="Task due date" type="datetime-local" value={todoDueAt} onChange={(event) => setTodoDueAt(event.target.value)} className="bg-[#0a0a0a] border border-[#07120f]/25 rounded-md px-2 py-2 text-xs text-neutral-300 outline-none focus:border-[#07120f]/50" />
-                  <input aria-label="Task reminder date" type="datetime-local" value={todoReminderAt} onChange={(event) => setTodoReminderAt(event.target.value)} className="bg-[#0a0a0a] border border-[#07120f]/25 rounded-md px-2 py-2 text-xs text-neutral-300 outline-none focus:border-[#07120f]/50" />
-                </div>
-                <button type="button" onClick={createTodoFromPanel} className="w-full px-3 py-2 bg-[#07120f] text-[#67E0A3] rounded-md text-xs font-semibold">
-                  Add Task
-                </button>
-              </section>
-            )}
-          </div>
-
-          <section className="space-y-2">
-            <h3 className="text-xs font-semibold text-neutral-400">Active</h3>
-            {incompleteTodos.length === 0 && <p className="text-sm text-neutral-500 border border-white/10 rounded-md p-4">No tasks yet.</p>}
-            {incompleteTodos.map((todo) => (
-              <article key={todo.id} className="border border-white/10 rounded-md p-3 bg-white/[0.02]">
-                <div className="flex items-center justify-between gap-3">
-                  <label className="flex min-w-0 items-center gap-2 text-sm text-neutral-200">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 shrink-0 accent-[#67E0A3]"
-                      checked={false}
-                      onChange={() => completeTodoFromPanel(todo.id, true)}
-                    />
-                    <span className="leading-snug">{todo.title}</span>
-                  </label>
-                  <button type="button" onClick={() => deleteTodoFromPanel(todo.id)} className="text-xs text-neutral-500 hover:text-neutral-300">Delete</button>
-                </div>
-                {todo.notes && <p className="mt-2 text-xs text-neutral-500">{todo.notes}</p>}
-              </article>
-            ))}
-          </section>
-
-          {completedTodos.length > 0 && (
-            <section className="space-y-2">
-              <h3 className="text-xs font-semibold text-neutral-400">Completed</h3>
-              {completedTodos.map((todo) => (
-                <article key={todo.id} className="border border-white/10 rounded-md p-3 bg-white/[0.02]">
-                  <label className="flex min-w-0 items-center gap-2 text-sm text-neutral-500">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 shrink-0 accent-[#67E0A3]"
-                      checked
-                      onChange={() => completeTodoFromPanel(todo.id, false)}
-                    />
-                    <span className="leading-snug">{todo.title}</span>
-                  </label>
-                </article>
-              ))}
-            </section>
-          )}
-        </div>
-      )}
-
-        </TabsContent>
-
-        <TabsContent value="focus" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
-          {activeTab === 'focus' && (
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
-          <section className="text-center border border-white/10 rounded-md p-5 bg-white/[0.03]">
-            <p className="text-xs text-neutral-500">{pomodoroState?.activeSession?.kind ?? 'focus'}</p>
-            <h3 className="text-5xl font-semibold tabular-nums text-white mt-2">{pomodoroDisplay}</h3>
-            <p className="mt-2 text-xs text-neutral-500">{pomodoroState?.activeSession?.status ?? 'idle'}</p>
-            {(pomodoroState?.activeSession?.status === 'running' || pomodoroState?.activeSession?.status === 'paused') && (
-              <p className="mt-2 text-xs text-neutral-600 max-w-xs mx-auto">
-                A small timer window appears above your companion. You can also hover the Ayati tray icon for the same countdown.
-              </p>
-            )}
-          </section>
-          <select
-            aria-label="Focus task"
-            value={selectedFocusTodoId}
-            onChange={(event) => setSelectedFocusTodoId(event.target.value)}
-            className="w-full bg-[#0a0a0a] border border-white/10 rounded-md px-3 py-2 text-sm text-neutral-300"
-          >
-            <option value="">No linked task</option>
-            {incompleteTodos.map((todo) => <option key={todo.id} value={todo.id}>{todo.title}</option>)}
-          </select>
-          <div className="grid grid-cols-3 gap-2">
-            <label className="block text-xs text-neutral-400">
-              Focus
-              <input
-                type="number"
-                min={1}
-                max={240}
-                value={pomodoroSettingsDraft.focusMinutes}
-                onChange={(event) => updatePomodoroMinuteDraftFromPanel('focusMinutes', event.target.value)}
-                onBlur={() => commitPomodoroMinuteDraftFromPanel('focusMinutes')}
-                className={`mt-1 ${SETTINGS_NUMBER_INPUT_CLASS}`}
-              />
-            </label>
-            <label className="block text-xs text-neutral-400">
-              Short Break
-              <input
-                type="number"
-                min={1}
-                max={120}
-                value={pomodoroSettingsDraft.shortBreakMinutes}
-                onChange={(event) => updatePomodoroMinuteDraftFromPanel('shortBreakMinutes', event.target.value)}
-                onBlur={() => commitPomodoroMinuteDraftFromPanel('shortBreakMinutes')}
-                className={`mt-1 ${SETTINGS_NUMBER_INPUT_CLASS}`}
-              />
-            </label>
-            <label className="block text-xs text-neutral-400">
-              Long Break
-              <input
-                type="number"
-                min={1}
-                max={120}
-                value={pomodoroSettingsDraft.longBreakMinutes}
-                onChange={(event) => updatePomodoroMinuteDraftFromPanel('longBreakMinutes', event.target.value)}
-                onBlur={() => commitPomodoroMinuteDraftFromPanel('longBreakMinutes')}
-                className={`mt-1 ${SETTINGS_NUMBER_INPUT_CLASS}`}
-              />
-            </label>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <button type="button" onClick={() => startPomodoroFromPanel('focus')} className="px-3 py-2 bg-[#67E0A3] text-[#07120f] rounded-md text-xs font-semibold">Start Focus</button>
-            <button type="button" onClick={() => startPomodoroFromPanel('shortBreak')} className="px-3 py-2 border border-white/10 rounded-md text-xs text-neutral-300">Start Short Break</button>
-            <button type="button" onClick={() => startPomodoroFromPanel('longBreak')} className="px-3 py-2 border border-white/10 rounded-md text-xs text-neutral-300">Start Long Break</button>
-            <button type="button" onClick={async () => setPomodoroState(await window.ayati.pausePomodoro())} className="px-3 py-2 border border-white/10 rounded-md text-xs text-neutral-300">Pause</button>
-            <button type="button" onClick={async () => setPomodoroState(await window.ayati.resumePomodoro())} className="px-3 py-2 border border-white/10 rounded-md text-xs text-neutral-300">Resume</button>
-            <button type="button" onClick={async () => setPomodoroState(await window.ayati.cancelPomodoro())} className="px-3 py-2 border border-white/10 rounded-md text-xs text-neutral-300">Cancel</button>
-          </div>
-          <p className="text-xs text-neutral-500">Completed focus sessions: {pomodoroState?.completedFocusCount ?? 0}</p>
-        </div>
-      )}
-
-      {/* CONTENT: Reflections */}
-        </TabsContent>
-
-        <TabsContent value="reflections" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
-          {activeTab === 'reflections' && (
-        <div className="flex-1 flex flex-col overflow-y-auto p-4 scrollbar-hide">
-
-          {quranStatusMessage && (
-            <div className="mb-3 text-xs text-[#67E0A3] bg-[#67E0A3]/10 border border-[#67E0A3]/25 rounded-md px-3 py-2">
-              {quranStatusMessage}
-            </div>
-          )}
-
-
-          <div className="mb-4 grid gap-2">
-            <input
-              type="search"
-              aria-label="Search reflections"
-              value={reflectionSearch}
-              onChange={(event) => setReflectionSearch(event.target.value)}
-              placeholder="Search reflections..."
-              className="w-full bg-[#0a0a0a] border border-white/10 rounded-md px-3 py-2 text-sm text-neutral-200 outline-none focus:border-[#67E0A3]"
-            />
-            <div className="grid grid-cols-3 gap-2">
-              <select
-                aria-label="Saved status filter"
-                value={reflectionStatusFilter}
-                onChange={(event) => setReflectionStatusFilter(event.target.value as typeof reflectionStatusFilter)}
-                className="bg-[#0a0a0a] border border-white/10 rounded-md px-2 py-2 text-xs text-neutral-300"
-              >
-                <option value="all">All</option>
-                <option value="saved">Saved</option>
-                <option value="pending">Pending</option>
-              </select>
-              <select
-                aria-label="Theme filter"
-                value={reflectionThemeFilter}
-                onChange={(event) => setReflectionThemeFilter(event.target.value as typeof reflectionThemeFilter)}
-                className="bg-[#0a0a0a] border border-white/10 rounded-md px-2 py-2 text-xs text-neutral-300"
-              >
-                <option value="all">All Themes</option>
-                {availableThemes.map((theme) => (
-                  <option key={theme} value={theme}>{theme}</option>
-                ))}
-              </select>
-              <select
-                aria-label="Feedback filter"
-                value={reflectionFeedbackFilter}
-                onChange={(event) => setReflectionFeedbackFilter(event.target.value as typeof reflectionFeedbackFilter)}
-                className="bg-[#0a0a0a] border border-white/10 rounded-md px-2 py-2 text-xs text-neutral-300"
-              >
-                <option value="all">All Feedback</option>
-                <option value="relevant">Relevant</option>
-                <option value="not_relevant">Not Relevant</option>
-              </select>
-            </div>
-          </div>
-
-          {reflections.length === 0 ? (
-            <div className="text-center text-neutral-500 py-12 border border-white/10 rounded-md">
-              <p className="mb-2 text-neutral-300">No reflections yet.</p>
-              <p>Capture your screen to receive a Quran-focused reminder.</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {filteredReflections.map((reflection) => (
-                <article key={reflection.id} className="border-t border-white/10 pt-4">
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <span className="text-xs font-semibold text-[#67E0A3]">
-                      {reflection.surahName} {reflection.verseKey}
-                    </span>
-                    <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-                      {reflection.syncState}
-                    </span>
-                  </div>
-                  <QulArabicText
-                    verseKey={reflection.verseKey}
-                    fallbackText={reflection.arabicText}
-                    className="text-right text-white"
-                    variant="assistant"
-                    qulSettingsKey={ayahQulSettingsKey}
-                  />
-                  <p translate="no" className="text-sm leading-relaxed text-neutral-200 mt-2">
-                    {reflection.translation}
-                  </p>
-                  <p className="text-xs leading-relaxed text-neutral-500 mt-3">
-                    {reflection.whyThisVerse}
-                  </p>
-                  {reflection.tafsir?.text?.trim() && (
-                    <section
-                      className="mt-3 border-l border-[#67E0A3]/40 pl-3"
-                      aria-label="Tafsir"
-                    >
-                      <div className="flex justify-end mb-2">
-                        <button
-                          type="button"
-                          onClick={() => loadReflectionTafsir(reflection.id)}
-                          className="px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-                        >
-                          Reload tafsir
-                        </button>
-                      </div>
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mb-2">
-                        <span className="text-[11px] font-medium text-[#AFF9C9]">Tafsir</span>
-                        {reflection.tafsir.resourceName && (
-                          <span className="text-[10px] text-neutral-500">{reflection.tafsir.resourceName}</span>
-                        )}
-                      </div>
-                      <div className="space-y-2.5">
-                        {getTafsirParagraphs(reflection.tafsir.text).map((paragraph, index) => (
-                          <p
-                            key={`${reflection.id}-tafsir-${index}`}
-                            className="text-xs leading-relaxed text-neutral-400"
-                            translate="no"
-                          >
-                            {paragraph}
-                          </p>
-                        ))}
-                      </div>
-                    </section>
-                  )}
-                  {reflection.audio?.url && (
-                    <audio aria-label={`Recitation for ${reflection.verseKey}`} controls src={reflection.audio.url} className="mt-3 w-full" />
-                  )}
-                  <textarea
-                    aria-label={`Note for ${reflection.verseKey}`}
-                    value={noteDrafts[reflection.id] ?? reflection.note?.body ?? ''}
-                    onChange={(event) => setNoteDrafts((current) => ({ ...current, [reflection.id]: event.target.value }))}
-                    placeholder="Add a short note..."
-                    className="mt-3 w-full bg-[#0a0a0a] border border-white/10 rounded-md px-3 py-2 text-xs text-neutral-200 outline-none focus:border-[#67E0A3]"
-                    rows={2}
-                  />
-                  {collections.length > 0 && (
-                    <select
-                      aria-label={`Collection for ${reflection.verseKey}`}
-                      defaultValue=""
-                      onChange={(event) => {
-                        if (event.target.value) void addReflectionToCollectionFromPanel(reflection.id, event.target.value);
-                      }}
-                      className="mt-3 w-full bg-[#0a0a0a] border border-white/10 rounded-md px-2 py-2 text-xs text-neutral-300"
-                    >
-                      <option value="">Save to collection…</option>
-                      {collections.map((collection) => (
-                        <option key={collection.id} value={collection.id}>{collection.name}</option>
-                      ))}
-                    </select>
-                  )}
-                  <div className="mt-3 flex w-full min-w-0 flex-nowrap items-center gap-2 overflow-x-auto">
-                    {!reflection.tafsir?.text?.trim() && (
-                      <button
-                        type="button"
-                        onClick={() => loadReflectionTafsir(reflection.id)}
-                        className="shrink-0 px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-                      >
-                        Show Tafsir
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => loadReflectionAudio(reflection.id)}
-                      className="shrink-0 px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-300 hover:border-[#67E0A3]/70"
-                    >
-                      Play Recitation
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await window.ayati.deleteAyahReflection(reflection.id);
-                        await refreshReflections();
-                      }}
-                      className="shrink-0 px-3 py-1.5 border border-white/10 rounded-md text-xs text-neutral-500 hover:text-red-400 hover:border-red-500/50"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </article>
-              ))}
-              {filteredReflections.length === 0 && (
-                <p className="text-center text-neutral-500 py-8">No reflections match these filters.</p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* CONTENT: Settings */}
-        </TabsContent>
-
-        <TabsContent value="settings" className="m-0 min-h-0 flex-1 outline-none data-[state=active]:flex">
-          {activeTab === 'settings' && (
-        <div className="flex-1 flex flex-col overflow-y-auto p-5 space-y-4 scrollbar-hide">
-          <SettingsSection title="Quran Reminders">
-            <div className="space-y-4">
-              <label className="flex items-center justify-between cursor-pointer group">
-                <div className="flex flex-col pr-4">
-                  <span className="text-sm font-medium text-neutral-300">
-                    Timer Quran Reminders
-                  </span>
-                  <span className="text-[11px] text-neutral-500 mt-0.5">
-                    Show a Quran reminder on the interval you choose
-                  </span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={ayahSettings?.timedReminders ?? false}
-                    onChange={(event) => updateAyahSetting('timedReminders', event.target.checked)}
-                  />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
-                  <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
-                </div>
-              </label>
-
-              <label className="flex items-center justify-between cursor-pointer group">
-                <div className="flex flex-col pr-4">
-                  <span className="text-sm font-medium text-neutral-300">
-                    App Switch Quran Nudges
-                  </span>
-                  <span className="text-[11px] text-neutral-500 mt-0.5">
-                    Show Quran-linked reminders only when app context is clear
-                  </span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={ayahSettings?.contextualNudges ?? true}
-                    onChange={(event) => updateAyahSetting('contextualNudges', event.target.checked)}
-                  />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
-                  <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
-                </div>
-              </label>
-
-              <div>
-                <div className="grid grid-cols-2 gap-4">
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Timer Minutes</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={1440}
-                    value={ayahSettings?.timedReminderMinutes ?? 15}
-                    onChange={(event) => updateAyahSetting('timedReminderMinutes', Number(event.target.value))}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
-                  />
-                </label>
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Cooldown Minutes</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={240}
-                    value={ayahSettings?.nudgeCooldownMinutes ?? 15}
-                    onChange={(event) => updateAyahSetting('nudgeCooldownMinutes', Number(event.target.value))}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
-                  />
-                </label>
-                </div>
-                <span className="mt-1 block text-[11px] text-neutral-500">
-                  Enter any minute interval from 1 to 1440.
-                </span>
-              </div>
-              <label className="block">
-                <span className="block text-xs font-medium text-neutral-300 mb-2">Reminder Listen Reciter</span>
-                <select
-                  aria-label="Reminder Listen Reciter"
-                  value={ayahSettings?.recitationId ?? ''}
-                  onChange={(event) => updateReminderListenReciter(event.target.value)}
-                  disabled={recitationResources.length === 0}
-                  className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all disabled:opacity-60"
-                >
-                  <option value="">
-                    {recitationResources.length === 0 ? 'Loading reciters' : 'Choose reciter'}
-                  </option>
-                  {recitationResources.map((resource) => (
-                    <option key={resource.id} value={resource.id}>{resource.name}</option>
-                  ))}
-                </select>
-                <span className="mt-1 block text-[11px] text-neutral-500">
-                  Used when you press Listen on Quran reminder cards.
-                </span>
-              </label>
-            </div>
-          </SettingsSection>
-
-          <SettingsSection title="Prayer Awareness">
-            <div className="space-y-4">
-              <label className="flex items-center justify-between cursor-pointer group">
-                <div className="flex flex-col pr-4">
-                  <span className="text-sm font-medium text-neutral-300">Enable Prayer Awareness</span>
-                  <span className="text-[11px] text-neutral-500 mt-0.5">Show prayer schedule and pet reminders</span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={prayerSettings?.enabled ?? false}
-                    onChange={(event) => updatePrayerSettingsFromSettings({ enabled: event.target.checked })}
-                  />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
-                  <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
-                </div>
-              </label>
-              <div className="grid grid-cols-2 gap-4">
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Country</span>
-                  <select
-                    value={currentPrayerDraft.country}
-                    onChange={(event) => {
-                      const country = event.target.value;
-                      const firstCity = PRAYER_LOCATION_PRESETS.find((preset) => preset.country === country)?.cities[0] ?? '';
-                      updatePrayerSettingsFromSettings({ country, city: firstCity });
-                    }}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
-                  >
-                    <option value="">Select country</option>
-                    {prayerCountryOptions.map((country) => (
-                      <option key={country} value={country}>{country}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">City</span>
-                  <select
-                    value={currentPrayerDraft.city}
-                    onChange={(event) => updatePrayerSettingsFromSettings({ city: event.target.value })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
-                  >
-                    <option value="">Select city</option>
-                    {prayerCityOptions.map((city) => (
-                      <option key={city} value={city}>{city}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Reminder Lead</span>
-                  <input
                     type="number"
                     min={0}
                     max={120}
                     value={prayerSettings?.reminderLeadMinutes ?? 10}
                     onChange={(event) => updatePrayerSettingsFromSettings({ reminderLeadMinutes: Number(event.target.value) })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                    className="border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 py-1 h-auto text-sm placeholder:text-neutral-600 focus-visible:border-b-[#67E0A3]/50 focus-visible:ring-0"
                   />
                 </label>
                 <label className="block">
-                  <span className="block text-xs font-medium text-neutral-300 mb-2">Calculation</span>
-                  <select
-                    value={currentPrayerDraft.method}
-                    onChange={(event) => updatePrayerSettingsFromSettings({ method: Number(event.target.value) })}
-                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                  <span className="block text-[11px] text-neutral-600 mb-1">Method</span>
+                  <Select
+                    value={String(currentPrayerDraft.method)}
+                    onValueChange={(value) => updatePrayerSettingsFromSettings({ method: Number(value) })}
                   >
-                    {PRAYER_CALCULATION_METHODS.map((method) => (
-                      <option key={method.id} value={method.id}>{method.label}</option>
-                    ))}
-                  </select>
+                    <SelectTrigger aria-label="Prayer calculation method" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                      {PRAYER_CALCULATION_METHODS.map((method) => (
+                        <SelectItem key={method.id} value={String(method.id)}>{method.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </label>
               </div>
             </div>
           </SettingsSection>
 
 
-          <SettingsSection title="Companion Behavior">
-            <div className="space-y-4">
+          <SettingsSection title="Companion">
+            <div className="space-y-3">
               <label className="flex items-center justify-between cursor-pointer group">
                 <div className="flex flex-col">
-                  <span className="text-sm font-medium text-neutral-300">
+                  <span className="text-sm">
                     Seek attention
                   </span>
-                  <span className="text-[11px] text-neutral-500 mt-0.5">
+                  <span className="text-[11px] text-neutral-600 mt-px">
                     Move toward cursor periodically
                   </span>
                 </div>
-                <div className="relative shrink-0">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={(settings.pet as { attentionSeeker: boolean })?.attentionSeeker ?? true}
-                    onChange={(e) => updateSetting('pet.attentionSeeker', e.target.checked)}
-                  />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
-                  <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
-                </div>
+                <Switch
+                  checked={(settings.pet as { attentionSeeker: boolean })?.attentionSeeker ?? true}
+                  onCheckedChange={(checked) => updateSetting('pet.attentionSeeker', checked)}
+                  className="data-[state=unchecked]:bg-neutral-700 data-[state=checked]:bg-[#67E0A3] shrink-0"
+                />
               </label>
               <label className="flex items-center justify-between cursor-pointer group">
                 <div className="flex flex-col">
-                  <span className="text-sm font-medium text-neutral-300">
+                  <span className="text-sm">
                     Transparent while asleep
                   </span>
-                  <span className="text-[11px] text-neutral-500 mt-0.5">
+                  <span className="text-[11px] text-neutral-600 mt-px">
                     Fade {APP_DISPLAY_NAME} when in doze/sleep state
                   </span>
                 </div>
-                <div className="relative shrink-0">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={(settings.pet as { transparentWhenSleeping?: boolean })?.transparentWhenSleeping ?? false}
-                    onChange={(e) => updateSetting('pet.transparentWhenSleeping', e.target.checked)}
-                  />
-                  <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
-                  <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
-                </div>
+                <Switch
+                  checked={(settings.pet as { transparentWhenSleeping?: boolean })?.transparentWhenSleeping ?? false}
+                  onCheckedChange={(checked) => updateSetting('pet.transparentWhenSleeping', checked)}
+                  className="data-[state=unchecked]:bg-neutral-700 data-[state=checked]:bg-[#67E0A3] shrink-0"
+                />
               </label>
-              <div className="space-y-4 pt-2">
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-sm font-medium text-neutral-300">Companion appearance</span>
-                  <span className="text-[11px] text-neutral-500">
-                    Which pet appears on your desktop
-                  </span>
-                </div>
-                <select
-                  aria-label="Companion appearance"
-                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3]/40"
+              <div>
+                <span className="block text-sm">Companion appearance</span>
+                <span className="block text-[11px] text-neutral-600 mt-px mb-1">
+                  Which pet appears on your desktop
+                </span>
+                <Select
                   value={(settings.pet as { appearanceId?: PetAppearanceId })?.appearanceId ?? 'ayah'}
-                  onChange={(e) => {
-                    void updateSetting('pet.appearanceId', e.target.value as PetAppearanceId);
-                  }}
+                  onValueChange={(value) => { void updateSetting('pet.appearanceId', value as PetAppearanceId); }}
                 >
-                  {PET_APPEARANCE_IDS.map((id) => (
-                    <option key={id} value={id}>
-                      {PET_APPEARANCE_LABELS[id]}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger aria-label="Companion appearance" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                    {PET_APPEARANCE_IDS.map((id) => (
+                      <SelectItem key={id} value={id}>
+                        {PET_APPEARANCE_LABELS[id]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </SettingsSection>
 
-          <SettingsSection title="Keyboard Shortcuts">
-            <div className="divide-y divide-white/5">
+          <SettingsSection title="Shortcuts">
+            <div className="space-y-3">
               <HotkeyInput
                 label="Open Assistant"
                 description="Open the full assistant panel"
@@ -1611,30 +1767,32 @@ export const Assistant: React.FC = () => {
           </SettingsSection>
 
           <SettingsSection title="Quran">
-            <div className="space-y-4">
-              <p className="text-[11px] text-neutral-500 leading-relaxed">
+            <div className="space-y-3">
+              <p className="text-[11px] text-neutral-600 leading-relaxed">
                 {KEYCHAIN_CONSENT_LEDE} On macOS, Ayati stores your Quran Foundation sign-in in Keychain after you approve access.
               </p>
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-neutral-300">
+                  <p className="text-sm">
                     {quranAuthStatus.isConnected ? 'Connected' : 'Not connected'}
                   </p>
-                  <p className="text-[11px] text-neutral-500 mt-0.5">
+                  <p className="text-[11px] text-neutral-600 mt-px">
                     {quranAuthStatus.userName ?? 'Sign in to sync bookmarks with Quran Foundation.'}
                   </p>
                 </div>
                 {quranAuthStatus.isConnected ? (
                   <button
+                    type="button"
                     onClick={disconnectQuran}
-                    className="px-3 py-2 bg-white/5 border border-white/10 rounded-md hover:bg-white/10 text-xs font-medium text-neutral-300"
+                    className="text-sm text-neutral-500 hover:text-neutral-300 transition-colors"
                   >
                     Sign Out
                   </button>
                 ) : (
                   <button
+                    type="button"
                     onClick={startQuranSignIn}
-                    className="px-3 py-2 bg-[#67E0A3] text-[#07120f] rounded-md text-xs font-semibold"
+                    className="text-sm text-[#67E0A3] hover:text-[#67E0A3]/80 transition-colors"
                   >
                     Sign In
                   </button>
@@ -1642,163 +1800,155 @@ export const Assistant: React.FC = () => {
               </div>
 
               <label className="block">
-                <span className="block text-xs font-medium text-neutral-300 mb-2">Quran Font</span>
-                <select
-                  aria-label="Quran Font"
+                <span className="block text-[11px] text-neutral-600 mb-1">Quran Font</span>
+                <Select
                   value={resolveSettingsQulMushafKey(ayahSettings?.qulMushafKey)}
-                  onChange={(event) => void updateAyahSetting('qulMushafKey', event.target.value)}
-                  className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all"
+                  onValueChange={(value) => void updateAyahSetting('qulMushafKey', value)}
                 >
-                  {QURAN_FONT_OPTIONS.map((opt) => (
-                    <option
-                      key={opt.value}
-                      value={opt.value}
-                      disabled={isQulFontPackMissing(qulFontPacks, opt.value)}
-                    >
-                      {opt.label}
-                      {isQulFontPackMissing(qulFontPacks, opt.value) ? ' — fonts missing in bundle' : ''}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger aria-label="Quran Font" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                    {QURAN_FONT_OPTIONS.map((opt) => (
+                      <SelectItem
+                        key={opt.value}
+                        value={opt.value}
+                        disabled={isQulFontPackMissing(qulFontPacks, opt.value)}
+                      >
+                        {opt.label}
+                        {isQulFontPackMissing(qulFontPacks, opt.value) ? ' — fonts missing in bundle' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
 
-              <div className="space-y-4">
-                <div>
-                  <h4 className="text-[10px] font-medium text-neutral-500 uppercase tracking-widest mb-1">
-                    Translation &amp; tafsir
-                  </h4>
-                  <div className="space-y-4 mt-3">
-                    <label className="block">
-                      <span className="block text-xs font-medium text-neutral-300 mb-2">Translation Language</span>
-                      <select
-                        aria-label="Filter translations by language"
-                        value={translationLanguageFilter}
-                        onChange={handleTranslationLanguageFilterChange}
-                        disabled={translationResources.length === 0}
-                        className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all disabled:opacity-50"
-                      >
-                        <option value="all">All languages</option>
-                        {translationCatalogLanguages.map((lang) => (
-                          <option key={lang} value={lang}>{lang}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block">
-                      <span className="block text-xs font-medium text-neutral-300 mb-2">Translation</span>
-                      <select
-                        aria-label="Quran translation resource"
-                        value={
-                          translationsForSettingsPicker.some((t) => t.id === ayahSettings?.translationId)
-                            ? String(ayahSettings?.translationId ?? '')
-                            : String(translationsForSettingsPicker[0]?.id ?? '')
-                        }
-                        onChange={(event) => void updateAyahSetting('translationId', Number(event.target.value))}
-                        disabled={translationsForSettingsPicker.length === 0}
-                        className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all disabled:opacity-50"
-                      >
-                        {translationsForSettingsPicker.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name}{t.languageName ? ` (${t.languageName})` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block">
-                      <span className="block text-xs font-medium text-neutral-300 mb-2">Tafsir edition</span>
-                      <select
-                        aria-label="Default tafsir resource"
-                        value={String(
-                          (typeof ayahSettings?.tafsirResourceId === 'number'
-                            && tafsirResources.some((r) => r.id === ayahSettings.tafsirResourceId)
-                            ? ayahSettings.tafsirResourceId
-                            : tafsirResources.find((r) => r.id === PREFERRED_TAFSIR_ID)?.id
-                              ?? tafsirResources[0]?.id
-                              ?? ''),
-                        )}
-                        onChange={(event) => void handleSettingsTafsirSelectChange(event)}
-                        disabled={tafsirResources.length === 0}
-                        className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3.5 py-2.5 min-h-[2.75rem] text-sm text-neutral-200 leading-snug outline-none focus:border-[#67E0A3] focus:ring-1 focus:ring-[#67E0A3]/30 transition-all disabled:opacity-50"
-                      >
-                        {tafsirResources.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.name}{r.languageName ? ` (${r.languageName})` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                </div>
+              <div className="space-y-3">
+                <span className="block text-[10px] text-neutral-600 uppercase tracking-widest">Translation &amp; tafsir</span>
+                <label className="block">
+                  <span className="block text-[11px] text-neutral-600 mb-1">Translation Language</span>
+                  <Select
+                    value={translationLanguageFilter}
+                    onValueChange={setTranslationLanguageFilter}
+                    disabled={translationResources.length === 0}
+                  >
+                    <SelectTrigger aria-label="Filter translations by language" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0 disabled:opacity-50">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                      <SelectItem value="all">All languages</SelectItem>
+                      {translationCatalogLanguages.map((lang) => (
+                        <SelectItem key={lang} value={lang}>{lang}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+                <label className="block">
+                  <span className="block text-[11px] text-neutral-600 mb-1">Translation</span>
+                  <Select
+                    value={
+                      translationsForSettingsPicker.some((t) => t.id === ayahSettings?.translationId)
+                        ? String(ayahSettings?.translationId ?? '')
+                        : String(translationsForSettingsPicker[0]?.id ?? '')
+                    }
+                    onValueChange={(value) => void updateAyahSetting('translationId', Number(value))}
+                    disabled={translationsForSettingsPicker.length === 0}
+                  >
+                    <SelectTrigger aria-label="Quran translation resource" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0 disabled:opacity-50">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                      {translationsForSettingsPicker.map((t) => (
+                        <SelectItem key={t.id} value={String(t.id)}>
+                          {t.name}{t.languageName ? ` (${t.languageName})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+                <label className="block">
+                  <span className="block text-[11px] text-neutral-600 mb-1">Tafsir</span>
+                  <Select
+                    value={String(
+                      (typeof ayahSettings?.tafsirResourceId === 'number'
+                        && tafsirResources.some((r) => r.id === ayahSettings.tafsirResourceId)
+                        ? ayahSettings.tafsirResourceId
+                        : tafsirResources.find((r) => r.id === PREFERRED_TAFSIR_ID)?.id
+                          ?? tafsirResources[0]?.id
+                          ?? ''),
+                    )}
+                    onValueChange={(value) => {
+                      if (!value) {
+                        void updateAyahSetting('tafsirResourceId', null);
+                        void updateAyahSetting('tafsirResourceName', null);
+                        return;
+                      }
+                      const id = Number(value);
+                      if (!Number.isInteger(id) || id <= 0) return;
+                      const resource = tafsirResources.find((r) => r.id === id);
+                      void updateAyahSetting('tafsirResourceId', id);
+                      if (resource?.name) void updateAyahSetting('tafsirResourceName', resource.name);
+                    }}
+                    disabled={tafsirResources.length === 0}
+                  >
+                    <SelectTrigger aria-label="Default tafsir resource" className="h-7 border-0 border-b border-neutral-800 rounded-none bg-transparent px-0 text-sm text-muted-foreground focus-visible:ring-0 disabled:opacity-50">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="border-neutral-800 bg-[#0f0f0f] text-xs text-muted-foreground">
+                      {tafsirResources.map((r) => (
+                        <SelectItem key={r.id} value={String(r.id)}>
+                          {r.name}{r.languageName ? ` (${r.languageName})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
               </div>
 
-              {quranStatusMessage && <p className="text-[11px] text-[#67E0A3]">{quranStatusMessage}</p>}
+              {quranStatusMessage && <p className="text-[11px] text-[#67E0A3]/70">{quranStatusMessage}</p>}
             </div>
           </SettingsSection>
 
           {isDevEnvironment && (
             <SettingsSection title="Developer">
-              <div className="space-y-4">
+              <div className="space-y-3">
               {isDevEnvironment && (
-                <label className="flex items-center justify-between cursor-pointer group px-1">
+                <label className="flex items-center justify-between cursor-pointer group">
                   <div className="flex flex-col">
-                    <span className="text-sm font-medium text-neutral-300">
-                      Show window borders
-                    </span>
-                    <span className="text-[11px] text-neutral-500 mt-0.5">
-                      Draw debug outlines around window bounds
-                    </span>
+                    <span className="text-sm">Show window borders</span>
+                    <span className="text-[11px] text-neutral-600 mt-px">Draw debug outlines around window bounds</span>
                   </div>
-                  <div className="relative shrink-0">
-                    <input
-                      type="checkbox"
-                      className="sr-only peer"
-                      checked={(settings.dev as { windowBorders?: boolean })?.windowBorders ?? false}
-                      onChange={(e) => updateSetting('dev.windowBorders', e.target.checked)}
-                    />
-                    <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
-                    <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
-                  </div>
+                  <Switch
+                    checked={(settings.dev as { windowBorders?: boolean })?.windowBorders ?? false}
+                    onCheckedChange={(checked) => updateSetting('dev.windowBorders', checked)}
+                    className="data-[state=unchecked]:bg-neutral-700 data-[state=checked]:bg-[#67E0A3] shrink-0"
+                  />
                 </label>
               )}
               {isDevEnvironment && (
-                <label className="flex items-center justify-between cursor-pointer group px-1">
+                <label className="flex items-center justify-between cursor-pointer group">
                   <div className="flex flex-col">
-                    <span className="text-sm font-medium text-neutral-300">
-                      Show companion mode overlay
-                    </span>
-                    <span className="text-[11px] text-neutral-500 mt-0.5">
-                      Display current mode text above {APP_DISPLAY_NAME}
-                    </span>
+                    <span className="text-sm">Show companion mode overlay</span>
+                    <span className="text-[11px] text-neutral-600 mt-px">Display current mode text above {APP_DISPLAY_NAME}</span>
                   </div>
-                  <div className="relative shrink-0">
-                    <input
-                      type="checkbox"
-                      className="sr-only peer"
-                      checked={(settings.dev as { showPetModeOverlay?: boolean })?.showPetModeOverlay ?? false}
-                      onChange={(e) => updateSetting('dev.showPetModeOverlay', e.target.checked)}
-                    />
-                    <div className="w-9 h-5 bg-neutral-800 rounded-full peer-checked:bg-[#67E0A3] transition-colors border border-white/5"></div>
-                    <div className="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full transition-transform peer-checked:translate-x-4 shadow-sm"></div>
-                  </div>
+                  <Switch
+                    checked={(settings.dev as { showPetModeOverlay?: boolean })?.showPetModeOverlay ?? false}
+                    onCheckedChange={(checked) => updateSetting('dev.showPetModeOverlay', checked)}
+                    className="data-[state=unchecked]:bg-neutral-700 data-[state=checked]:bg-[#67E0A3] shrink-0"
+                  />
                 </label>
               )}
               {isDevEnvironment && (
                 <div className="space-y-2">
-                  <div className="px-1">
-                    <span className="text-sm font-medium text-neutral-300">
-                      Force companion state
-                    </span>
-                    <p className="text-[11px] text-neutral-500 mt-0.5">
-                      Instantly set {APP_DISPLAY_NAME}&apos;s current mood state
-                    </p>
-                  </div>
+                  <span className="block text-sm">Force companion state</span>
+                  <span className="block text-[11px] text-neutral-600 mt-px">Instantly set {APP_DISPLAY_NAME}&apos;s current mood state</span>
                   <div className="grid grid-cols-3 gap-2">
                     {forcedCompanionStates.map((mood) => (
                       <button
                         key={mood}
-                        onClick={() => {
-                          window.ayati.executePetAction({ type: 'set_mood', value: mood });
-                        }}
-                        className="px-2.5 py-2 bg-white/5 border border-white/10 rounded-md hover:bg-white/10 text-xs font-medium text-neutral-300 transition-colors"
+                        type="button"
+                        onClick={() => { window.ayati.executePetAction({ type: 'set_mood', value: mood }); }}
+                        className="text-sm text-neutral-500 hover:text-neutral-300 transition-colors"
                       >
                         {mood}
                       </button>
@@ -1808,87 +1958,83 @@ export const Assistant: React.FC = () => {
               )}
               {isDevEnvironment && (
                 <button
-                  onClick={() => {
-                    void window.ayati.forceActiveAppComment();
-                  }}
-                  className="w-full flex items-center justify-between px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors group"
+                  type="button"
+                  onClick={() => { void window.ayati.forceActiveAppComment(); }}
+                  className="w-full flex items-center justify-between text-sm text-neutral-500 hover:text-neutral-300 transition-colors"
                 >
-                  <div className="flex items-center gap-2">
-                    <Icon icon="solar:monitor-smartphone-linear" className="text-neutral-400 group-hover:text-neutral-300" />
-                    <span className="text-sm font-medium text-neutral-300">Test Active App Comment</span>
-                  </div>
-                  <span className="text-[10px] text-neutral-500">Dev action</span>
+                  <span className="flex items-center gap-2">
+                    <Icon icon="solar:monitor-smartphone-linear" className="text-neutral-600" />
+                    <span>Test Active App Comment</span>
+                  </span>
+                  <span className="text-[10px] text-neutral-600">Dev action</span>
                 </button>
               )}
               {isDevEnvironment && (
                 <button
-                  onClick={() => {
-                    void triggerTestReminderComment();
-                  }}
-                  className="w-full flex items-center justify-between px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors group"
+                  type="button"
+                  onClick={() => { void triggerTestReminderComment(); }}
+                  className="w-full flex items-center justify-between text-sm text-neutral-500 hover:text-neutral-300 transition-colors"
                 >
-                  <div className="flex items-center gap-2">
-                    <Icon icon="solar:bell-bing-linear" className="text-neutral-400 group-hover:text-neutral-300" />
-                    <span className="text-sm font-medium text-neutral-300">Test Reminder Comment</span>
-                  </div>
-                  <span className="text-[10px] text-neutral-500">Dev action</span>
+                  <span className="flex items-center gap-2">
+                    <Icon icon="solar:bell-bing-linear" className="text-neutral-600" />
+                    <span>Test Reminder Comment</span>
+                  </span>
+                  <span className="text-[10px] text-neutral-600">Dev action</span>
                 </button>
               )}
               {isDevEnvironment && (
                 <button
-                  onClick={() => {
-                    void triggerTestPrayerReminderComment();
-                  }}
-                  className="w-full flex items-center justify-between px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors group"
+                  type="button"
+                  onClick={() => { void triggerTestPrayerReminderComment(); }}
+                  className="w-full flex items-center justify-between text-sm text-neutral-500 hover:text-neutral-300 transition-colors"
                 >
-                  <div className="flex items-center gap-2">
-                    <Icon icon="solar:alarm-linear" className="text-neutral-400 group-hover:text-neutral-300" />
-                    <span className="text-sm font-medium text-neutral-300">Test Prayer Reminder (Maghrib)</span>
-                  </div>
-                  <span className="text-[10px] text-neutral-500">Dev action</span>
+                  <span className="flex items-center gap-2">
+                    <Icon icon="solar:alarm-linear" className="text-neutral-600" />
+                    <span>Test Prayer Reminder (Maghrib)</span>
+                  </span>
+                  <span className="text-[10px] text-neutral-600">Dev action</span>
                 </button>
               )}
               {isDevEnvironment && (
                 <button
-                  onClick={() => {
-                    void triggerTestTodoReminderComment();
-                  }}
-                  className="w-full flex items-center justify-between px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors group"
+                  type="button"
+                  onClick={() => { void triggerTestTodoReminderComment(); }}
+                  className="w-full flex items-center justify-between text-sm text-neutral-500 hover:text-neutral-300 transition-colors"
                 >
-                  <div className="flex items-center gap-2">
-                    <Icon icon="solar:clipboard-list-linear" className="text-neutral-400 group-hover:text-neutral-300" />
-                    <span className="text-sm font-medium text-neutral-300">Test To Do Reminder</span>
-                  </div>
-                  <span className="text-[10px] text-neutral-500">Review PR 3</span>
+                  <span className="flex items-center gap-2">
+                    <Icon icon="solar:clipboard-list-linear" className="text-neutral-600" />
+                    <span>Test To Do Reminder</span>
+                  </span>
+                  <span className="text-[10px] text-neutral-600">Review PR 3</span>
                 </button>
               )}
               {isDevEnvironment && (
                 <button
-                  onClick={() => {
-                    window.ayati.forcePetSleep();
-                  }}
-                  className="w-full flex items-center justify-between px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors group"
+                  type="button"
+                  onClick={() => { window.ayati.forcePetSleep(); }}
+                  className="w-full flex items-center justify-between text-sm text-neutral-500 hover:text-neutral-300 transition-colors"
                 >
-                  <div className="flex items-center gap-2">
-                    <Icon icon="solar:sleeping-linear" className="text-neutral-400 group-hover:text-neutral-300" />
-                    <span className="text-sm font-medium text-neutral-300">Set {APP_DISPLAY_NAME} to Sleep</span>
-                  </div>
-                  <span className="text-[10px] text-neutral-500">Dev action</span>
+                  <span className="flex items-center gap-2">
+                    <Icon icon="solar:sleeping-linear" className="text-neutral-600" />
+                    <span>Set {APP_DISPLAY_NAME} to Sleep</span>
+                  </span>
+                  <span className="text-[10px] text-neutral-600">Dev action</span>
                 </button>
               )}
               <button
+                type="button"
                 onClick={() => {
                   if (confirm('This will reset onboarding and restart the app. Continue?')) {
                     window.ayati.resetOnboarding();
                   }
                 }}
-                className="w-full flex items-center justify-between px-3 py-2.5 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors group"
+                className="w-full flex items-center justify-between text-sm text-neutral-500 hover:text-neutral-300 transition-colors"
               >
-                <div className="flex items-center gap-2">
-                  <Icon icon="solar:restart-linear" className="text-neutral-400 group-hover:text-neutral-300" />
-                  <span className="text-sm font-medium text-neutral-300">Reset Onboarding</span>
-                </div>
-                <span className="text-[10px] text-neutral-500">Restart required</span>
+                <span className="flex items-center gap-2">
+                  <Icon icon="solar:restart-linear" className="text-neutral-600" />
+                  <span>Reset Onboarding</span>
+                </span>
+                <span className="text-[10px] text-neutral-600">Restart required</span>
               </button>
               </div>
             </SettingsSection>
@@ -1897,15 +2043,14 @@ export const Assistant: React.FC = () => {
           <button
             type="button"
             onClick={() => window.ayati.petContextMenuAction('quit')}
-            className="mt-auto w-full flex items-center justify-center gap-2 px-3 py-3 rounded-lg border border-white/10 bg-white/[0.03] text-sm font-medium text-neutral-400 hover:text-red-400 hover:bg-red-500/10 hover:border-red-500/20 transition-colors"
+            className="mt-auto w-full flex items-center justify-center gap-2 py-3 text-sm text-neutral-600 hover:text-red-400 transition-colors"
           >
-            <Icon icon="solar:power-linear" width="16" height="16" />
+            <Icon icon="solar:close-circle-linear" width="16" height="16" />
             <span>Quit {APP_DISPLAY_NAME}</span>
           </button>
         </div>
           )}
-        </TabsContent>
-      </Tabs>
+      </div>
 
       <KeychainConsentModal
         isOpen={keychainConsentOpen}

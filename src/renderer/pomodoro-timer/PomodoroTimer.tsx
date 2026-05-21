@@ -6,8 +6,7 @@ import {
 import './pomodoro-timer.css';
 
 function kindLabel(kind: PomodoroPetOverlayPayload['kind']): string {
-  if (kind === 'shortBreak') return 'Short break';
-  if (kind === 'longBreak') return 'Long break';
+  if (kind === 'break') return 'Break';
   return 'Focus';
 }
 

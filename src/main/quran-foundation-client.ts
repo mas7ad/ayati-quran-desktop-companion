@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'crypto';
 
 import type {
   AyahCollection,
+  Footnote,
   QuranAudioFile,
   QuranBookmarkResult,
   QuranTafsirSnippet,
@@ -100,6 +101,49 @@ function stripHtml(value: string): string {
     .replace(/<[^>]*>/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Token used to mark footnote positions in translation text.
+ * Followed by the footnote number, e.g. "\x00FN:1\x00"
+ */
+const FN_TOKEN = '\x00FN:';
+const FN_TOKEN_END = '\x00';
+
+/** Regex to find footnote tokens in processed text. */
+const FN_TOKEN_RE = /\x00FN:(\d+)\x00/g;
+
+/**
+ * Parse footnotes from Quran.com translation HTML.
+ * Footnotes appear as <sup foot_note=ID>NUMBER</sup>.
+ * Returns a tokenized text (with \x00FN:NUMBER\x00 placeholders in position)
+ * and an array of { id, number } for each footnote found.
+ */
+function parseFootnoteMarkers(html: string): {
+  translationWithTokens: string;
+  footnoteRefs: Array<{ id: number; number: number }>;
+} {
+  const footnoteRefs: Array<{ id: number; number: number }> = [];
+  const seenIds = new Set<number>();
+
+  // First, replace <sup foot_note=ID>NUMBER</sup> with position-preserving tokens
+  const withTokens = html.replace(/<sup\s+foot_note=(\d+)>(\d+)<\/sup>/gi, (_match, idStr, numStr) => {
+    const id = Number.parseInt(idStr, 10);
+    const number = Number.parseInt(numStr, 10);
+    if (!Number.isNaN(id) && !seenIds.has(id)) {
+      seenIds.add(id);
+      footnoteRefs.push({ id, number });
+    }
+    return `${FN_TOKEN}${number}${FN_TOKEN_END}`;
+  });
+
+  // Then strip remaining HTML tags and normalize whitespace
+  const translationWithTokens = withTokens
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return { translationWithTokens, footnoteRefs };
 }
 
 function parseVerseKey(verseKey: string): { surah: number; ayah: number } {
@@ -322,14 +366,65 @@ export class QuranFoundationClient {
       );
     }
 
+    const rawTranslationHtml = translation.text;
+    const { translationWithTokens, footnoteRefs } = parseFootnoteMarkers(rawTranslationHtml);
+
+    // Fetch footnote texts in parallel if any
+    let footnotes: Footnote[] | undefined;
+    if (footnoteRefs.length > 0) {
+      const footnoteIds = footnoteRefs.map((ref) => ref.id);
+      const footnoteTexts = await this.fetchFootnotes(accessToken, footnoteIds);
+      const footnoteMap = new Map(footnoteTexts.map((fn) => [fn.id, fn.text]));
+      footnotes = footnoteRefs
+        .map((ref) => ({
+          id: ref.id,
+          number: ref.number,
+          text: footnoteMap.get(ref.id) ?? '',
+        }))
+        .filter((fn) => fn.text.length > 0);
+    }
+
     return {
       verseKey: verse.verse_key,
       surahName: getSurahName(verse.chapter_id),
       ayahNumber: verse.verse_number,
       arabicText: stripHtml(verse.text_uthmani),
-      translation: stripHtml(translation.text),
+      translation: translationWithTokens,
       translatorId: translation.resource_id ?? translationId,
+      footnotes: footnotes && footnotes.length > 0 ? footnotes : undefined,
     };
+  }
+
+  async fetchFootnotes(
+    accessToken: string | null,
+    footnoteIds: number[],
+  ): Promise<Array<{ id: number; text: string; languageName?: string }>> {
+    if (footnoteIds.length === 0) return [];
+
+    const results = await Promise.allSettled(
+      footnoteIds.map((id) =>
+        this.fetchImpl(this.getContentUrl(`foot_notes/${id}`).toString(), {
+          method: 'GET',
+          headers: this.getApiHeaders(accessToken),
+        }).then(async (res) => {
+          if (!res.ok) return null;
+          const payload = (await res.json()) as {
+            foot_note?: { id?: number; text?: string; language_name?: string };
+          };
+          const fn = payload.foot_note;
+          if (!fn?.id || !fn.text) return null;
+          return { id: fn.id, text: fn.text, languageName: fn.language_name };
+        }),
+      ),
+    );
+
+    return results
+      .filter(
+        (r): r is PromiseFulfilledResult<{ id: number; text: string; languageName: string | undefined } | null> =>
+          r.status === 'fulfilled',
+      )
+      .map((r) => r.value)
+      .filter((v): v is { id: number; text: string; languageName: string | undefined } => v !== null);
   }
 
   async createBookmark(

@@ -511,10 +511,10 @@ export const PetChat: React.FC = () => {
                       aria-busy={isButtonLoading}
                       disabled={loadingQuickReply !== null}
                       onClick={() => handleQuickReply(label)}
-                      className={`whitespace-nowrap px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67E0A3]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f0f] disabled:cursor-default disabled:opacity-75 ${
+                      className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67E0A3]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f0f] disabled:cursor-default disabled:opacity-75 ${
                         label === 'Dismiss' || label === 'Not now'
-                          ? 'bg-white/5 border border-white/10 text-neutral-400 hover:bg-white/10 hover:text-neutral-300'
-                          : 'bg-[#67E0A3]/10 border border-[#67E0A3]/20 text-[#67E0A3] hover:bg-[#67E0A3]/20 hover:border-[#67E0A3]/40'
+                          ? 'text-neutral-500 hover:text-neutral-300 hover:bg-white/5'
+                          : 'text-[#67E0A3] hover:text-[#7CF0BD] hover:bg-white/5'
                       }`}
                     >
                       {isButtonLoading ? (
@@ -534,14 +534,14 @@ export const PetChat: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => void saveReflectionNote()}
-                  className="px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67E0A3]/60 bg-[#67E0A3]/10 border border-[#67E0A3]/20 text-[#67E0A3] hover:bg-[#67E0A3]/20"
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#67E0A3]/60 text-[#67E0A3] hover:text-[#7CF0BD] hover:bg-white/5"
                 >
                   Save reflection
                 </button>
                 <button
                   type="button"
                   onClick={cancelReflectionNote}
-                  className="px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 bg-white/5 border border-white/10 text-neutral-400 hover:bg-white/10"
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20 text-neutral-500 hover:text-neutral-300 hover:bg-white/5"
                 >
                   Cancel
                 </button>

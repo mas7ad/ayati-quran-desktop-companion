@@ -21,7 +21,7 @@ export function getClientPomodoroRemainingMs(state: PomodoroStateRemainingSlice 
 
 export type PomodoroPetOverlayPayload = {
   remainingMs: number;
-  kind: 'focus' | 'shortBreak' | 'longBreak';
+  kind: 'focus' | 'break';
   status: 'running' | 'paused';
 };
 

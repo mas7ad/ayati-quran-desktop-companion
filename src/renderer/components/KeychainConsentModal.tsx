@@ -16,15 +16,15 @@ export function KeychainConsentModal({ isOpen, onContinue, onCancel }: KeychainC
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/60"
         onClick={onCancel}
       />
 
-      <div className="relative bg-[#07120f] border border-[#67E0A3]/20 rounded-lg w-full max-w-lg mx-4 p-5 shadow-2xl">
+      <div className="relative bg-[#0f0f0f] w-full max-w-lg mx-4 p-6">
         <button
           type="button"
           onClick={onCancel}
-          className="absolute top-4 right-4 text-neutral-500 hover:text-neutral-400 transition-colors"
+          className="absolute top-6 right-6 text-neutral-600 hover:text-neutral-400 transition-colors"
           aria-label="Close"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -32,31 +32,33 @@ export function KeychainConsentModal({ isOpen, onContinue, onCancel }: KeychainC
           </svg>
         </button>
 
-        <h2 className="text-lg font-semibold text-white pr-8">{KEYCHAIN_CONSENT_TITLE}</h2>
-        <p className="text-sm text-[#b9c9c1] mt-2">{KEYCHAIN_CONSENT_LEDE}</p>
+        <h2 className="text-base font-semibold text-white pr-8">{KEYCHAIN_CONSENT_TITLE}</h2>
+        <p className="text-sm text-neutral-300 mt-3">{KEYCHAIN_CONSENT_LEDE}</p>
 
-        <ul className="mt-4 space-y-3 text-sm text-neutral-300 list-disc pl-5">
+        <ul className="mt-4 space-y-2.5 text-sm text-neutral-400 list-disc pl-5">
           {KEYCHAIN_CONSENT_BULLETS.map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
 
-        <p className="mt-4 text-xs text-neutral-500">
-          After you tap Continue, macOS may ask for your login password to unlock Keychain access. That prompt comes from Apple; Ayati cannot change its wording.
-        </p>
+        <div className="mt-6 border-t border-neutral-900 pt-5">
+          <p className="text-[11px] text-neutral-600 leading-relaxed">
+            After you tap Continue, macOS may ask for your login password to unlock Keychain access. That prompt comes from Apple; Ayati cannot change its wording.
+          </p>
+        </div>
 
-        <div className="mt-6 flex justify-end gap-2">
+        <div className="mt-5 flex justify-end gap-4">
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 text-sm text-neutral-300 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+            className="text-sm text-neutral-500 hover:text-neutral-300 transition-colors"
           >
             Not Now
           </button>
           <button
             type="button"
             onClick={onContinue}
-            className="px-4 py-2 text-sm bg-[#67E0A3] hover:bg-[#7CF0BD] text-[#07120f] rounded-lg font-semibold transition-colors"
+            className="text-sm text-[#67E0A3] hover:text-[#67E0A3]/80 transition-colors font-medium"
           >
             Continue
           </button>

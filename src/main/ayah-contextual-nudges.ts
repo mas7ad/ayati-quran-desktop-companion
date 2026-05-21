@@ -19,7 +19,6 @@ const DEFAULT_NUDGE_COOLDOWN_MINUTES = 15;
 const DEFAULT_TIMED_REMINDER_MINUTES = 15;
 const DEFAULT_TIMED_REMINDER_FETCH_TIMEOUT_MS = 700;
 const TIMED_REMINDER_REFLECTION = 'Pause for a Quran reminder and let this ayah reset the next moment.';
-const TIMED_REMINDER_REASON = 'This reminder was shown on the interval you set.';
 
 type NudgeTheme = Exclude<AyahTheme, 'unclear'>;
 type ReflectionCopy = Pick<ReturnType<typeof rankAyahCandidates>[number], 'reflection' | 'whyThisVerse'>;
@@ -454,7 +453,7 @@ export async function buildTimedQuranReminder(input: TimedQuranReminderInput): P
 
   const reflection = buildReflection(verse, {
     reflection: TIMED_REMINDER_REFLECTION,
-    whyThisVerse: TIMED_REMINDER_REASON,
+    whyThisVerse: '',
   }, insight, input.now);
 
   return {

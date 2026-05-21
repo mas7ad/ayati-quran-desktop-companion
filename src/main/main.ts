@@ -849,6 +849,7 @@ function buildAyahReflection(
     rankedCandidateVerseKeys,
     sourceCandidateIndex,
     alternateGroupId,
+    footnotes: verse.footnotes,
   };
 }
 
@@ -1261,6 +1262,7 @@ function updatePrayerSettings(patch: Partial<PrayerSettings>): PrayerSettings {
     reminderLeadMinutes: sanitizeNumberSetting(patch.reminderLeadMinutes, current.reminderLeadMinutes, 0, 120),
     quietMinutesAfterPrayer: sanitizeNumberSetting(patch.quietMinutesAfterPrayer, current.quietMinutesAfterPrayer, 0, 120),
     hasSavedSettings: typeof patch.hasSavedSettings === 'boolean' ? patch.hasSavedSettings : current.hasSavedSettings,
+    use24h: typeof patch.use24h === 'boolean' ? patch.use24h : current.use24h,
   };
   const shouldClearToday =
     nextSettings.city !== current.city
@@ -1297,9 +1299,7 @@ function updatePomodoroSettings(patch: Partial<PomodoroSettings>): PomodoroSetti
   const current = state.pomodoro.settings;
   const settings: PomodoroSettings = {
     focusMinutes: sanitizeNumberSetting(patch.focusMinutes, current.focusMinutes, 1, 240),
-    shortBreakMinutes: sanitizeNumberSetting(patch.shortBreakMinutes, current.shortBreakMinutes, 1, 120),
-    longBreakMinutes: sanitizeNumberSetting(patch.longBreakMinutes, current.longBreakMinutes, 1, 120),
-    sessionsUntilLongBreak: sanitizeNumberSetting(patch.sessionsUntilLongBreak, current.sessionsUntilLongBreak, 1, 12),
+    breakMinutes: sanitizeNumberSetting(patch.breakMinutes, current.breakMinutes, 1, 120),
     petRemindersEnabled: typeof patch.petRemindersEnabled === 'boolean' ? patch.petRemindersEnabled : current.petRemindersEnabled,
   };
   setAyahLensState({ ...state, pomodoro: { ...state.pomodoro, settings } });
@@ -2880,8 +2880,7 @@ function maybeCompletePomodoro(): boolean {
 }
 
 function pomodoroSessionKindLabel(kind: PomodoroSessionKind): string {
-  if (kind === 'shortBreak') return 'Short break';
-  if (kind === 'longBreak') return 'Long break';
+  if (kind === 'break') return 'Break';
   return 'Focus';
 }
 

@@ -63,6 +63,7 @@ export function createDefaultAyahLensState(): AyahLensState {
         reminderLeadMinutes: 10,
         quietMinutesAfterPrayer: 15,
         hasSavedSettings: false,
+        use24h: true,
       },
       today: null,
       tomorrow: null,
@@ -78,9 +79,7 @@ export function createDefaultAyahLensState(): AyahLensState {
     pomodoro: {
       settings: {
         focusMinutes: 25,
-        shortBreakMinutes: 5,
-        longBreakMinutes: 15,
-        sessionsUntilLongBreak: 4,
+        breakMinutes: 10,
         petRemindersEnabled: true,
       },
       activeSession: null,

@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { AyahCollection, AyahReflection } from '../../main/ayah-types';
+import type { AyahCollection, AyahReflection, Footnote } from '../../main/ayah-types';
 import { QulArabicText } from '../components/QulArabicText';
+
+/** Regex matching footnote tokens embedded in translation text: \x00FN:NUMBER\x00 */
+const FN_TOKEN_RE = /\x00FN:(\d+)\x00/g;
 
 interface AyahVerseCardProps {
   reflection: AyahReflection;
@@ -71,6 +74,103 @@ export function getTafsirParagraphs(text: string): string[] {
   }
 
   return paragraphs.length > 0 ? paragraphs : [text.trim()].filter(Boolean);
+}
+
+interface TranslationSegment {
+  type: 'text' | 'footnote';
+  value: string; // text content for 'text', footnote number for 'footnote'
+}
+
+/**
+ * Splits tokenized translation text into an array of segments.
+ * Tokens are in the form \x00FN:NUMBER\x00.
+ */
+function tokenizeTranslation(text: string): TranslationSegment[] {
+  const segments: TranslationSegment[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  const re = new RegExp(FN_TOKEN_RE);
+
+  while ((match = re.exec(text)) !== null) {
+    // Push text before this token
+    if (match.index > lastIndex) {
+      segments.push({ type: 'text', value: text.slice(lastIndex, match.index) });
+    }
+    segments.push({ type: 'footnote', value: match[1] });
+    lastIndex = re.lastIndex;
+  }
+
+  // Push remaining text after last token
+  if (lastIndex < text.length) {
+    segments.push({ type: 'text', value: text.slice(lastIndex) });
+  }
+
+  return segments;
+}
+
+/**
+ * Returns footnote display info for a given footnote number.
+ */
+function getFootnoteInfo(footnotes: Footnote[] | undefined, number: number): Footnote | undefined {
+  return footnotes?.find((fn) => fn.number === number);
+}
+
+function TranslationWithFootnotes({
+  text,
+  footnotes,
+}: {
+  text: string;
+  footnotes?: Footnote[];
+}): JSX.Element {
+  const [openFootnotes, setOpenFootnotes] = useState<Set<number>>(new Set());
+
+  const toggleFootnote = useCallback((number: number) => {
+    setOpenFootnotes((prev) => {
+      const next = new Set(prev);
+      if (next.has(number)) {
+        next.delete(number);
+      } else {
+        next.add(number);
+      }
+      return next;
+    });
+  }, []);
+
+  const segments = tokenizeTranslation(text);
+
+  return (
+    <span className="ayah-translation-text">
+      {segments.map((seg, index) => {
+        if (seg.type === 'text') {
+          return <React.Fragment key={`t-${index}`}>{seg.value}</React.Fragment>;
+        }
+        const num = Number.parseInt(seg.value, 10);
+        const info = footnotes ? getFootnoteInfo(footnotes, num) : undefined;
+        const isOpen = openFootnotes.has(num);
+        return (
+          <React.Fragment key={`fn-${num}`}>
+            <sup>
+              <button
+                type="button"
+                className={`ayah-footnote-badge${isOpen ? ' ayah-footnote-badge--open' : ''}`}
+                onClick={() => toggleFootnote(num)}
+                aria-label={`Footnote ${num}${info ? `: ${info.text.slice(0, 60)}` : ''}`}
+                aria-expanded={isOpen}
+              >
+                {num}
+              </button>
+            </sup>
+            {isOpen && info && (
+              <span className="ayah-footnote-popover">
+                <span className="ayah-footnote-number">{num}.</span>
+                {info.text}
+              </span>
+            )}
+          </React.Fragment>
+        );
+      })}
+    </span>
+  );
 }
 
 export function AyahVerseCard({
@@ -230,12 +330,20 @@ export function AyahVerseCard({
         variant="card"
       />
 
-      <p className="ayah-translation">{reflection.translation}</p>
+      <div className="ayah-translation">
+        <TranslationWithFootnotes
+          text={reflection.translation}
+          footnotes={reflection.footnotes}
+        />
+      </div>
 
       <div className="ayah-reflection-copy">
         <p className="ayah-reflection-lead">{reflection.reflection}</p>
         <details className="ayah-details ayah-why-details">
-          <summary className="ayah-details-summary">Why this verse</summary>
+          <summary className="ayah-details-summary">
+            <span className="ayah-details-chevron inline-block text-neutral-600 transition-transform duration-150 text-[10px] leading-none -ml-0.5 mr-1">▶</span>
+            Why this verse
+          </summary>
           <p className="ayah-why-body">{reflection.whyThisVerse}</p>
         </details>
       </div>
@@ -314,7 +422,10 @@ export function AyahVerseCard({
       )}
 
       <details className="ayah-details ayah-extras-details">
-        <summary className="ayah-details-summary">Note, collection, feedback</summary>
+        <summary className="ayah-details-summary">
+          <span className="ayah-details-chevron inline-block text-neutral-600 transition-transform duration-150 text-[10px] leading-none -ml-0.5 mr-1">▶</span>
+          Note, collection, feedback
+        </summary>
         <div className="ayah-extras-body">
           <section className="ayah-note-panel">
             <label htmlFor={`ayah-note-${reflection.id}`}>Note</label>
