@@ -6,6 +6,10 @@
       "name": "ayahlens",
       "dependencies": {
         "@iconify/react": "^6.0.2",
+        "@img/sharp-libvips-win32-arm64": "^1.2.4",
+        "@img/sharp-libvips-win32-x64": "^1.2.4",
+        "@img/sharp-win32-arm64": "^0.34.5",
+        "@img/sharp-win32-x64": "^0.34.5",
         "active-win": "^8.1.0",
         "chokidar": "^3.5.3",
         "chrono-node": "^2.9.1",
@@ -55,6 +59,7 @@
   },
   "trustedDependencies": [
     "electron",
+    "sharp",
     "active-win",
   ],
   "packages": {
@@ -249,6 +254,10 @@
     "@img/sharp-libvips-linuxmusl-arm64": ["@img/sharp-libvips-linuxmusl-arm64@1.2.4", "", { "os": "linux", "cpu": "arm64" }, "sha512-FVQHuwx1IIuNow9QAbYUzJ+En8KcVm9Lk5+uGUQJHaZmMECZmOlix9HnH7n1TRkXMS0pGxIJokIVB9SuqZGGXw=="],
 
     "@img/sharp-libvips-linuxmusl-x64": ["@img/sharp-libvips-linuxmusl-x64@1.2.4", "", { "os": "linux", "cpu": "x64" }, "sha512-+LpyBk7L44ZIXwz/VYfglaX/okxezESc6UxDSoyo2Ks6Jxc4Y7sGjpgU9s4PMgqgjj1gZCylTieNamqA1MF7Dg=="],
+
+    "@img/sharp-libvips-win32-arm64": ["@img/sharp-libvips-win32-arm64@1.2.4", "", {}, "sha512-y2mwNharMsM9QKSrCpDPwcwGVtBgjIHtAA4e76Ialz+lpYl/T8gpK00wOdnW9wn1Tup407CVN4XQOgZx/RwN7g=="],
+
+    "@img/sharp-libvips-win32-x64": ["@img/sharp-libvips-win32-x64@1.2.4", "", {}, "sha512-fpCMPMNm6z5dA0fEFTXn93JJJql0ya7Z5rSC80pd5IJE0/TBzRSGI1zx4CHYOSTBls26TxRGUxnfNgEJk4DNeA=="],
 
     "@img/sharp-linux-arm": ["@img/sharp-linux-arm@0.34.5", "", { "optionalDependencies": { "@img/sharp-libvips-linux-arm": "1.2.4" }, "os": "linux", "cpu": "arm" }, "sha512-9dLqsvwtg1uuXBGZKsxem9595+ujv0sJ6Vi8wcTANSFpwV/GONat5eCkzQo/1O6zRIkh0m/8+5BjrRr7jDUSZw=="],
 
